@@ -12,6 +12,7 @@
 #include "drivers/serial.h"
 #include "lib/kprintf.h"
 #include "kernel/gdt.h"
+#include "kernel/interrupts.h"
 
 /* Il valore che un bootloader Multiboot mette in EAX prima di saltare al kernel. */
 #define MULTIBOOT_BOOTLOADER_MAGIC 0x2BADB002
@@ -76,6 +77,14 @@ void kernel_main(uint32_t magic, uint32_t multiboot_info)
     /* --- Fase 2: tabelle della CPU e interrupt --- */
     gdt_init();
     kprintf("GDT caricata\n");
+
+    interrupts_init();
+    kprintf("IDT caricata\n");
+
+    /* Prova: `int3` genera apposta l'eccezione 3. Se IDT, stub e ritorno con `iret`
+     * funzionano, il gestore stampa un messaggio e l'esecuzione prosegue qui sotto. */
+    __asm__ volatile ("int3");
+    kprintf("Ritorno dall'eccezione riuscito\n");
 
     kprintf("Kernel fermo (hlt).\n");
     halt();
