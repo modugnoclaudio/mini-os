@@ -165,6 +165,8 @@ Prova kprintf: stringa, 42, -7, 0xff, Z, 100%
 Kernel fermo (hlt). Fine della fase 1.
 >>> TEST OK: messaggio trovato sulla seriale
 ```
+(Dalla fase 2 l'output di `make test` è più lungo: vedi `docs/notes/fase2-interrupt.md`.)
+
 - `make run` apre la finestra di QEMU: le stesse cinque righe compaiono in alto a
   sinistra, grigio su nero, e anche nel terminale. Si chiude la finestra per uscire.
 - `make run-nox` mostra solo la seriale. Si esce con `Ctrl+A` e poi `X`.
