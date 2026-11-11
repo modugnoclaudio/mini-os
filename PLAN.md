@@ -74,6 +74,7 @@ _(nessun bug aperto)_
 - 11/11 — Fasi 0 e 1 sviluppate e provate in un container Linux (gcc 13.3, nasm 2.16, ld 2.42,
   QEMU 8.2.2), **non ancora sul PC dell'autore in WSL2**. `make run` (finestra grafica) lì non
   è stato provato: lo schermo VGA è stato verificato leggendo la memoria a `0xB8000` dal monitor di QEMU.
+- 11/11 — ✅ risolto: `make test` si bloccava in un terminale vero (WSL2) perché usava `timeout` insieme a `-serial stdio`. Ora la seriale va su file. Dettagli in `docs/notes/fase1-boot.md`, "Errori incontrati".
 - 11/11 — `kprintf` non supporta larghezza/riempimento (es. `%08x`) né `%u`: da aggiungere quando serviranno.
 
 ## Registro delle sessioni

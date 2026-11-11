@@ -114,10 +114,19 @@ run-nox: $(KERNEL)
 
 # Prova automatica: avvia QEMU senza finestra per 5 secondi, salva la seriale in un
 # file e controlla che contenga il messaggio atteso.
+#   -serial file:...   QEMU scrive la seriale direttamente nel file
+#   -monitor none      niente console di comandi di QEMU
+#   < /dev/null        QEMU non ha una tastiera da cui leggere
+# Qui NON si usa -serial stdio: `timeout` avvia QEMU "in background" rispetto al
+# terminale, e un processo in background che tocca il terminale viene sospeso dal
+# sistema operativo (segnali SIGTTIN/SIGTTOU: il controllo dei job visto a lezione).
+# Risultato: QEMU restava congelato e il test si bloccava.
 # `timeout` termina QEMU (il kernel non esce mai da solo); `|| true` ignora il suo
 # codice di uscita "scaduto"; `grep -q` fallisce se il testo non c'è.
 test: $(KERNEL)
-	@timeout 5 $(QEMU) $(QEMUFLAGS) -display none > $(BUILD)/serial.log 2>/dev/null || true
+	@rm -f $(BUILD)/serial.log
+	@timeout 5 $(QEMU) -kernel $(KERNEL) -no-reboot -display none -monitor none \
+		-serial file:$(BUILD)/serial.log < /dev/null > /dev/null 2>&1 || true
 	@cat $(BUILD)/serial.log
 	@grep -q "Hello, kernel!" $(BUILD)/serial.log \
 		&& echo ">>> TEST OK: messaggio trovato sulla seriale" \

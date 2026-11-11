@@ -182,7 +182,18 @@ Kernel fermo (hlt). Fine della fase 1.
 
 **Sintomo:** `make test` stampava "qemu-system-i386: terminating on signal 15".
 **Causa:** non è un errore. Il kernel non termina mai, quindi è `timeout` a chiudere
-QEMU dopo 5 secondi. Il messaggio va su stderr e ora viene nascosto con `2>/dev/null`.
+QEMU dopo 5 secondi. Il messaggio va su stderr e ora viene nascosto.
+
+**Sintomo:** su WSL2 `make test` si bloccava dopo ">>> Kernel pronto" senza stampare nulla
+(nel container di sviluppo invece passava).
+**Causa:** il test usava `timeout 5 qemu ... -serial stdio`. `timeout` avvia QEMU in un
+gruppo di processi in *background* rispetto al terminale. Con `-serial stdio` QEMU prova
+a configurare e leggere il terminale, e il sistema operativo sospende i processi in
+background che lo fanno (segnali `SIGTTOU`/`SIGTTIN`, il controllo dei job). QEMU restava
+congelato prima di eseguire il kernel. Nel container non c'era un vero terminale, quindi
+il problema non si vedeva. Risolto scrivendo la seriale su file (`-serial file:build/serial.log`)
+e dando `/dev/null` come ingresso: QEMU non tocca più il terminale.
+Lezione: un test va provato nello stesso tipo di ambiente in cui verrà usato.
 
 **Errore evitato in anticipo:** l'header Multiboot deve stare nei primi 8 KiB del file.
 Per questo ha una sezione sua (`.multiboot`) messa per prima in `linker.ld` con `KEEP`.
