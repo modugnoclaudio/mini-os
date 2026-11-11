@@ -11,6 +11,7 @@
 #include "drivers/vga.h"
 #include "drivers/serial.h"
 #include "lib/kprintf.h"
+#include "kernel/gdt.h"
 
 /* Il valore che un bootloader Multiboot mette in EAX prima di saltare al kernel. */
 #define MULTIBOOT_BOOTLOADER_MAGIC 0x2BADB002
@@ -72,6 +73,10 @@ void kernel_main(uint32_t magic, uint32_t multiboot_info)
     kprintf("Prova kprintf: %s, %d, %d, 0x%x, %c, 100%%\n",
             "stringa", 42, -7, 255, 'Z');
 
-    kprintf("Kernel fermo (hlt). Fine della fase 1.\n");
+    /* --- Fase 2: tabelle della CPU e interrupt --- */
+    gdt_init();
+    kprintf("GDT caricata\n");
+
+    kprintf("Kernel fermo (hlt).\n");
     halt();
 }
