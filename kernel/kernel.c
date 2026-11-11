@@ -14,6 +14,7 @@
 #include "kernel/gdt.h"
 #include "kernel/interrupts.h"
 #include "drivers/timer.h"
+#include "drivers/keyboard.h"
 
 /* Il valore che un bootloader Multiboot mette in EAX prima di saltare al kernel. */
 #define MULTIBOOT_BOOTLOADER_MAGIC 0x2BADB002
@@ -89,6 +90,9 @@ void kernel_main(uint32_t magic, uint32_t multiboot_info)
 
     timer_init();
     kprintf("Timer a %d Hz\n", TIMER_HZ);
+
+    keyboard_init();
+    kprintf("Tastiera pronta: i tasti premuti compaiono qui sotto\n");
 
     /* Da qui in poi la CPU accetta gli interrupt hardware. Va fatto per ultimo,
      * quando tabelle e gestori sono tutti al loro posto. */

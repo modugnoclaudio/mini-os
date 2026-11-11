@@ -59,6 +59,22 @@ static int serial_can_transmit(void)
     return inb(COM1 + UART_LINE_STATUS) & 0x20;
 }
 
+/*
+ * Invia un byte così com'è, aspettando che il chip sia pronto.
+ *
+ * ATTESA ATTIVA (busy waiting / polling): giriamo a vuoto finché il chip non è
+ * pronto. È la tecnica che a lezione si confronta con gli interrupt: spreca CPU,
+ * ma è semplicissima e funziona anche prima di aver configurato gli interrupt.
+ */
+static void serial_write_byte(char c)
+{
+    while (!serial_can_transmit()) {
+        /* niente: aspettiamo */
+    }
+
+    outb(COM1 + UART_DATA, (uint8_t) c);
+}
+
 void serial_putchar(char c)
 {
     /* I terminali vogliono "\r\n" (ritorno carrello + a capo) per andare a inizio riga.
@@ -67,14 +83,13 @@ void serial_putchar(char c)
         serial_putchar('\r');
     }
 
-    /*
-     * ATTESA ATTIVA (busy waiting / polling): giriamo a vuoto finché il chip non è
-     * pronto. È la tecnica che a lezione si confronta con gli interrupt: spreca CPU,
-     * ma è semplicissima e funziona anche prima di aver configurato gli interrupt.
-     */
-    while (!serial_can_transmit()) {
-        /* niente: aspettiamo */
+    /* Backspace: un terminale con '\b' sposta solo il cursore a sinistra. Per cancellare
+     * davvero il carattere si manda "indietro, spazio, indietro". Qui inviamo i primi
+     * due; il terzo '\b' è quello inviato in fondo alla funzione. */
+    if (c == '\b') {
+        serial_write_byte('\b');
+        serial_write_byte(' ');
     }
 
-    outb(COM1 + UART_DATA, (uint8_t) c);
+    serial_write_byte(c);
 }

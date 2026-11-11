@@ -101,6 +101,13 @@ void vga_putchar(char c)
         /* A capo: prima colonna della riga successiva. */
         cursor_col = 0;
         cursor_row++;
+    } else if (c == '\b') {
+        /* Backspace: torna indietro di una casella e la cancella con uno spazio.
+         * Per semplicità non risale alla riga precedente. */
+        if (cursor_col > 0) {
+            cursor_col--;
+            vga_buffer[cursor_row * VGA_WIDTH + cursor_col] = vga_entry(' ');
+        }
     } else {
         vga_buffer[cursor_row * VGA_WIDTH + cursor_col] = vga_entry(c);
         cursor_col++;

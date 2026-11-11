@@ -8,7 +8,7 @@
 /* Pulisce lo schermo e porta il cursore in alto a sinistra. Va chiamata per prima. */
 void vga_init(void);
 
-/* Stampa un carattere alla posizione del cursore. Gestisce '\n' e lo scorrimento. */
+/* Stampa un carattere alla posizione del cursore. Gestisce '\n', '\b' (backspace) e lo scorrimento. */
 void vga_putchar(char c);
 
 /*
