@@ -13,6 +13,7 @@
 #include "lib/kprintf.h"
 #include "kernel/gdt.h"
 #include "kernel/interrupts.h"
+#include "drivers/timer.h"
 
 /* Il valore che un bootloader Multiboot mette in EAX prima di saltare al kernel. */
 #define MULTIBOOT_BOOTLOADER_MAGIC 0x2BADB002
@@ -79,13 +80,35 @@ void kernel_main(uint32_t magic, uint32_t multiboot_info)
     kprintf("GDT caricata\n");
 
     interrupts_init();
-    kprintf("IDT caricata\n");
+    kprintf("IDT caricata, PIC rimappato\n");
 
     /* Prova: `int3` genera apposta l'eccezione 3. Se IDT, stub e ritorno con `iret`
      * funzionano, il gestore stampa un messaggio e l'esecuzione prosegue qui sotto. */
     __asm__ volatile ("int3");
     kprintf("Ritorno dall'eccezione riuscito\n");
 
-    kprintf("Kernel fermo (hlt).\n");
-    halt();
+    timer_init();
+    kprintf("Timer a %d Hz\n", TIMER_HZ);
+
+    /* Da qui in poi la CPU accetta gli interrupt hardware. Va fatto per ultimo,
+     * quando tabelle e gestori sono tutti al loro posto. */
+    interrupts_enable();
+    kprintf("Interrupt abilitati\n");
+
+    /*
+     * Ciclo principale ("idle loop"). `hlt` addormenta la CPU fino al prossimo
+     * interrupt: niente attesa attiva, a differenza del polling della seriale.
+     * A ogni risveglio (almeno 100 volte al secondo, per il timer) controlliamo
+     * se è passato un altro secondo. Stampiamo solo i primi 3 per non riempire lo schermo.
+     */
+    uint32_t last_second = 0;
+    for (;;) {
+        __asm__ volatile ("hlt");
+
+        uint32_t second = timer_get_ticks() / TIMER_HZ;
+        if (second != last_second && second <= 3) {
+            last_second = second;
+            kprintf("Timer: %d s dall'avvio\n", second);
+        }
+    }
 }

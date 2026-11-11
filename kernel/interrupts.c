@@ -19,6 +19,7 @@
 #include "kernel/interrupts.h"
 #include "kernel/idt.h"
 #include "lib/kprintf.h"
+#include "drivers/pic.h"
 
 /*
  * La tabella dei gestori: un array di puntatori a funzione, indicizzato dal numero
@@ -124,6 +125,17 @@ void interrupt_dispatch(struct registers *regs)
 {
     interrupt_handler_t handler = handlers[regs->int_no];
 
+    /*
+     * Interrupt hardware: mandiamo subito al PIC la conferma (EOI), PRIMA di chiamare
+     * il gestore. Non c'è pericolo che ne arrivi un altro nel frattempo: la CPU tiene
+     * gli interrupt disabilitati finché non eseguiamo `iret` (vedi "interrupt gate"
+     * in kernel/idt.c). Farlo prima ci tornerà utile nella fase 4: il gestore del
+     * timer potrà cambiare processo senza "dimenticarsi" la conferma.
+     */
+    if (regs->int_no >= INT_IRQ_BASE) {
+        pic_send_eoi((uint8_t) (regs->int_no - INT_IRQ_BASE));
+    }
+
     if (handler != 0) {
         /* Chiamata attraverso il puntatore a funzione: stessa sintassi di una
          * chiamata normale. */
@@ -137,5 +149,6 @@ void interrupt_dispatch(struct registers *regs)
 void interrupts_init(void)
 {
     idt_init();
+    pic_init();
     interrupt_register_handler(INT_BREAKPOINT, breakpoint_handler);
 }

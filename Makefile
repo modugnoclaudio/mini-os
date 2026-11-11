@@ -125,7 +125,7 @@ run-nox: $(KERNEL)
 # codice di uscita "scaduto"; `grep -q` fallisce se il testo non c'è.
 test: $(KERNEL)
 	@rm -f $(BUILD)/serial.log
-	@timeout 5 $(QEMU) -kernel $(KERNEL) -no-reboot -display none -monitor none \
+	@timeout 8 $(QEMU) -kernel $(KERNEL) -no-reboot -display none -monitor none \
 		-serial file:$(BUILD)/serial.log < /dev/null > /dev/null 2>&1 || true
 	@cat $(BUILD)/serial.log
 	@grep -q "Hello, kernel!" $(BUILD)/serial.log \

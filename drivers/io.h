@@ -55,4 +55,15 @@ static inline uint8_t inb(uint16_t port)
     return value;
 }
 
+/*
+ * Piccola pausa (circa un microsecondo). Alcuni chip vecchi, come il PIC, hanno bisogno
+ * di un attimo tra un comando e il successivo. Scrivere sulla porta 0x80 è il trucco
+ * classico: è una porta inutilizzata (serviva ai codici diagnostici del BIOS) e
+ * l'operazione di I/O in sé fa perdere il tempo necessario.
+ */
+static inline void io_wait(void)
+{
+    outb(0x80, 0);
+}
+
 #endif /* DRIVERS_IO_H */
