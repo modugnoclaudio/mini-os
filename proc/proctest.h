@@ -11,6 +11,9 @@
 /* Due processi che si passano la CPU volontariamente con process_yield(). */
 void proctest_cooperative(void);
 
+/* Due processi che non cedono mai la CPU (il timer gliela toglie) e uno che dorme. */
+void proctest_preemptive(void);
+
 /* Stampa il riepilogo finale: quante verifiche sono fallite in tutto. */
 void proctest_summary(void);
 

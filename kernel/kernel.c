@@ -131,17 +131,22 @@ void kernel_main(uint32_t magic, uint32_t multiboot_info)
     kprintf("Processi inizializzati: kernel_main e' il processo 0 (idle)\n");
 
     proctest_cooperative();
+    proctest_preemptive();
     proctest_summary();
 
     /*
-     * Ciclo principale ("idle loop"). `hlt` addormenta la CPU fino al prossimo
-     * interrupt: niente attesa attiva, a differenza del polling della seriale.
-     * A ogni risveglio (almeno 100 volte al secondo, per il timer) controlliamo
-     * se è passato un altro secondo. Stampiamo solo i primi 3 per non riempire lo schermo.
+     * Ciclo del processo idle. `hlt` addormenta la CPU fino al prossimo interrupt:
+     * niente attesa attiva. Questo codice gira solo quando nessun altro processo è
+     * pronto (lo scheduler sceglie il processo 0 per ultimo).
+     * A ogni risveglio fa due lavoretti:
+     *   - libera la memoria dei processi terminati;
+     *   - stampa i secondi trascorsi (solo i primi 3, per non riempire lo schermo).
      */
     uint32_t last_second = 0;
     for (;;) {
         __asm__ volatile ("hlt");
+
+        process_reap_terminated();
 
         uint32_t second = timer_get_ticks() / TIMER_HZ;
         if (second != last_second && second <= 3) {
