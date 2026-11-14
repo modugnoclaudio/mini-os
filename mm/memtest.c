@@ -10,6 +10,8 @@
 #include "mm/memtest.h"
 #include "mm/pmm.h"
 #include "mm/paging.h"
+#include "mm/kheap.h"
+#include "lib/string.h"
 #include "lib/kprintf.h"
 
 /* Quante verifiche sono fallite finora. */
@@ -90,6 +92,72 @@ void memtest_paging(void)
           paging_get_physical(virtual_address) == 0);
 
     pmm_free_page(frame);
+}
+
+/* Restituisce 1 se tutti i `count` byte a partire da `pointer` valgono `value`. */
+static int all_bytes_equal(const uint8_t *pointer, uint32_t count, uint8_t value)
+{
+    for (uint32_t i = 0; i < count; i++) {
+        if (pointer[i] != value) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+void memtest_heap(void)
+{
+    kprintf("Prova dell'heap:\n");
+
+    /* kmalloc restituisce un `void *` (indirizzo senza tipo): il cast dice come
+     * vogliamo usare quella memoria. Qui come array di byte. */
+    uint8_t *a = (uint8_t *) kmalloc(40);
+    uint8_t *b = (uint8_t *) kmalloc(200);
+    uint8_t *c = (uint8_t *) kmalloc(1000);
+
+    check("tre allocazioni riuscite", a != 0 && b != 0 && c != 0);
+    check("gli indirizzi sono nella zona dell'heap e multipli di 8",
+          (uint32_t) a >= KHEAP_START && (uint32_t) a % 8 == 0 &&
+          (uint32_t) b % 8 == 0 && (uint32_t) c % 8 == 0);
+
+    /* Riempiamo ogni blocco con un valore diverso e poi rileggiamo tutto:
+     * se due blocchi si sovrapponessero, uno dei tre risulterebbe sporcato. */
+    memset(a, 0xAA, 40);
+    memset(b, 0xBB, 200);
+    memset(c, 0xCC, 1000);
+    check("i tre blocchi non si sovrappongono",
+          all_bytes_equal(a, 40, 0xAA) && all_bytes_equal(b, 200, 0xBB) &&
+          all_bytes_equal(c, 1000, 0xCC));
+
+    kheap_dump();
+
+    /* Liberando il blocco in mezzo resta un "buco" di 200 byte. Una richiesta più
+     * piccola deve finire lì (first fit), non in fondo all'heap. */
+    kfree(b);
+    uint8_t *d = (uint8_t *) kmalloc(100);
+    check("un blocco liberato viene riutilizzato (first fit)", d == b);
+
+    /* Un blocco più grande di una pagina: l'heap deve crescere da solo. */
+    uint32_t big_size = 3 * PAGE_SIZE;
+    uint8_t *e = (uint8_t *) kmalloc(big_size);
+    check("allocazione grande (12 KiB): l'heap cresce", e != 0);
+    if (e != 0) {
+        e[0] = 1;
+        e[big_size - 1] = 2;        /* l'ultimo byte: dev'essere mappato anche lui */
+        check("il blocco grande e' scrivibile fino in fondo",
+              e[0] == 1 && e[big_size - 1] == 2);
+    }
+
+    /* Liberando tutto, i blocchi liberi vicini devono fondersi fino a tornare uno solo. */
+    kfree(a);
+    kfree(c);
+    kfree(d);
+    kfree(e);
+    check("dopo aver liberato tutto non resta nulla di occupato",
+          kheap_get_used_bytes() == 0);
+    check("i blocchi liberi si sono fusi in uno solo", kheap_get_block_count() == 1);
+
+    kheap_dump();
 }
 
 void memtest_summary(void)

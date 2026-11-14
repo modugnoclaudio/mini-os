@@ -113,7 +113,8 @@ run-nox: $(KERNEL)
 	$(QEMU) -kernel $(KERNEL) -nographic -no-reboot
 
 # Prova automatica: avvia QEMU senza finestra per 8 secondi, salva la seriale in un
-# file e controlla che contenga i messaggi attesi (avvio, eccezione di prova, timer).
+# file e controlla che contenga i messaggi attesi (avvio, eccezione di prova, prove
+# della memoria, timer) e che non compaia mai la parola "ERRORE".
 #   -serial file:...   QEMU scrive la seriale direttamente nel file
 #   -monitor none      niente console di comandi di QEMU
 #   < /dev/null        QEMU non ha una tastiera da cui leggere
@@ -130,9 +131,11 @@ test: $(KERNEL)
 	@cat $(BUILD)/serial.log
 	@grep -q "Hello, kernel!" $(BUILD)/serial.log \
 		&& grep -q "Ritorno dall'eccezione riuscito" $(BUILD)/serial.log \
+		&& grep -q "Memoria: tutte le prove superate" $(BUILD)/serial.log \
+		&& ! grep -q "ERRORE" $(BUILD)/serial.log \
 		&& grep -q "Timer: 2 s" $(BUILD)/serial.log \
-		&& echo ">>> TEST OK: avvio, eccezioni e timer funzionano" \
-		|| (echo ">>> TEST FALLITO: manca uno dei messaggi attesi" && false)
+		&& echo ">>> TEST OK: avvio, eccezioni, memoria e timer funzionano" \
+		|| (echo ">>> TEST FALLITO: manca un messaggio atteso oppure c'e' un ERRORE" && false)
 
 # Debug con GDB.
 #   -s  QEMU apre un server GDB sulla porta TCP 1234
