@@ -112,6 +112,7 @@ void kernel_main(uint32_t magic, uint32_t multiboot_info)
 
     kheap_init();
     memtest_heap();
+    memtest_address_spaces();
 
     memtest_summary();
 
