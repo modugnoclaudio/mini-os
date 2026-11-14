@@ -9,6 +9,7 @@
 
 /* Numeri di interrupt usati dal kernel. */
 #define INT_BREAKPOINT 3        /* eccezione generata dall'istruzione `int3`       */
+#define INT_PAGE_FAULT 14       /* accesso a una pagina non valida (vedi mm/paging.c) */
 #define INT_IRQ_BASE   32       /* l'IRQ n arriva come interrupt numero 32 + n      */
 #define IRQ_TIMER      0
 #define IRQ_KEYBOARD   1
@@ -56,6 +57,10 @@ void interrupts_init(void);
 
 /* Registra la funzione da chiamare quando arriva l'interrupt `number` (0-47). */
 void interrupt_register_handler(uint8_t number, interrupt_handler_t handler);
+
+/* Stampa lo stato della CPU salvato in `regs` e ferma il sistema. Non ritorna mai.
+ * Usata per le eccezioni che non si possono gestire. */
+void interrupt_panic(struct registers *regs);
 
 /* Abilita / disabilita gli interrupt hardware nella CPU (istruzioni `sti` e `cli`). */
 void interrupts_enable(void);

@@ -84,7 +84,7 @@ void interrupt_register_handler(uint8_t number, interrupt_handler_t handler)
  * In Java un'eccezione non catturata termina il thread con uno stack trace;
  * qui il "thread" è l'intero sistema operativo.
  */
-static void panic_on_exception(struct registers *regs)
+void interrupt_panic(struct registers *regs)
 {
     /* `regs->eip` è la scorciatoia per `(*regs).eip`: accede al campo di una struct
      * attraverso un puntatore. In Java si scrive sempre `.` perché ogni oggetto è
@@ -142,7 +142,7 @@ void interrupt_dispatch(struct registers *regs)
         handler(regs);
     } else if (regs->int_no < 32) {
         /* Un'eccezione senza gestore è un bug del kernel. */
-        panic_on_exception(regs);
+        interrupt_panic(regs);
     }
 }
 

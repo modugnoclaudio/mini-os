@@ -17,6 +17,7 @@
 #include "drivers/keyboard.h"
 #include "kernel/multiboot.h"
 #include "mm/pmm.h"
+#include "mm/paging.h"
 #include "mm/memtest.h"
 
 /* Il valore che un bootloader Multiboot mette in EAX prima di saltare al kernel. */
@@ -99,6 +100,9 @@ void kernel_main(uint32_t magic, uint32_t multiboot_info)
 
     pmm_init(mbi);
     memtest_pmm();
+
+    paging_init();
+    memtest_paging();
 
     memtest_summary();
 

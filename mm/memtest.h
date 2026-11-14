@@ -9,6 +9,7 @@
 #define MM_MEMTEST_H
 
 void memtest_pmm(void);         /* allocatore di pagine fisiche */
+void memtest_paging(void);      /* paginazione                  */
 
 /* Stampa il riepilogo finale: quante verifiche sono fallite in tutto. */
 void memtest_summary(void);
