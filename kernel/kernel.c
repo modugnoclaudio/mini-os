@@ -15,6 +15,14 @@
 #include "kernel/interrupts.h"
 #include "drivers/timer.h"
 #include "drivers/keyboard.h"
+#include "kernel/multiboot.h"
+#include "mm/pmm.h"
+#include "mm/paging.h"
+#include "mm/kheap.h"
+#include "mm/memtest.h"
+#include "proc/process.h"
+#include "proc/scheduler.h"
+#include "proc/proctest.h"
 
 /* Il valore che un bootloader Multiboot mette in EAX prima di saltare al kernel. */
 #define MULTIBOOT_BOOTLOADER_MAGIC 0x2BADB002
@@ -46,8 +54,8 @@ static void halt(void)
  * Chiamata da _start in boot/boot.asm con due argomenti messi sullo stack:
  *   magic          = numero magico Multiboot (era nel registro EAX)
  *   multiboot_info = indirizzo fisico della struttura con le info di sistema (era in EBX).
- *                    Per ora lo teniamo come semplice numero; lo useremo nella fase 3
- *                    per leggere la mappa della memoria.
+ *                    Arriva come semplice numero: più sotto lo convertiamo in un
+ *                    puntatore per leggere la mappa della memoria.
  */
 void kernel_main(uint32_t magic, uint32_t multiboot_info)
 {
@@ -88,6 +96,23 @@ void kernel_main(uint32_t magic, uint32_t multiboot_info)
     __asm__ volatile ("int3");
     kprintf("Ritorno dall'eccezione riuscito\n");
 
+    /* --- Fase 3: gestione della memoria --- */
+
+    /* Il cast dice al compilatore: "a questo indirizzo c'è una struct multiboot_info".
+     * Non copia nulla: cambia solo il modo in cui leggiamo quei byte. */
+    struct multiboot_info *mbi = (struct multiboot_info *) multiboot_info;
+
+    pmm_init(mbi);
+    memtest_pmm();
+
+    paging_init();
+    memtest_paging();
+
+    kheap_init();
+    memtest_heap();
+
+    memtest_summary();
+
     timer_init();
     kprintf("Timer a %d Hz\n", TIMER_HZ);
 
@@ -99,15 +124,29 @@ void kernel_main(uint32_t magic, uint32_t multiboot_info)
     interrupts_enable();
     kprintf("Interrupt abilitati\n");
 
+    /* --- Fase 4: processi --- */
+
+    /* Da questo momento il codice che stiamo eseguendo È il processo 0. */
+    process_init();
+    kprintf("Processi inizializzati: kernel_main e' il processo 0 (idle)\n");
+
+    proctest_cooperative();
+    proctest_preemptive();
+    proctest_summary();
+
     /*
-     * Ciclo principale ("idle loop"). `hlt` addormenta la CPU fino al prossimo
-     * interrupt: niente attesa attiva, a differenza del polling della seriale.
-     * A ogni risveglio (almeno 100 volte al secondo, per il timer) controlliamo
-     * se è passato un altro secondo. Stampiamo solo i primi 3 per non riempire lo schermo.
+     * Ciclo del processo idle. `hlt` addormenta la CPU fino al prossimo interrupt:
+     * niente attesa attiva. Questo codice gira solo quando nessun altro processo è
+     * pronto (lo scheduler sceglie il processo 0 per ultimo).
+     * A ogni risveglio fa due lavoretti:
+     *   - libera la memoria dei processi terminati;
+     *   - stampa i secondi trascorsi (solo i primi 3, per non riempire lo schermo).
      */
     uint32_t last_second = 0;
     for (;;) {
         __asm__ volatile ("hlt");
+
+        process_reap_terminated();
 
         uint32_t second = timer_get_ticks() / TIMER_HZ;
         if (second != last_second && second <= 3) {

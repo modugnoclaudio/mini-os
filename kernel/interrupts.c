@@ -70,6 +70,27 @@ void interrupts_disable(void)
     __asm__ volatile ("cli");
 }
 
+uint32_t interrupts_save_and_disable(void)
+{
+    /*
+     * Il registro EFLAGS contiene, tra gli altri, il bit IF ("interrupt flag", bit 9):
+     * 1 = interrupt abilitati. Non si può leggere con un `mov`: lo si mette sullo
+     * stack con `pushf` e lo si riprende con `pop` in un registro normale.
+     * Poi `cli` spegne gli interrupt.
+     */
+    uint32_t flags;
+    __asm__ volatile ("pushf; pop %0; cli" : "=r"(flags));
+    return flags;
+}
+
+void interrupts_restore(uint32_t flags)
+{
+    /* 0x200 = bit 9 = IF. Riaccendiamo solo se prima erano accesi. */
+    if (flags & 0x200) {
+        interrupts_enable();
+    }
+}
+
 void interrupt_register_handler(uint8_t number, interrupt_handler_t handler)
 {
     if (number < INTERRUPT_STUB_COUNT) {
@@ -84,7 +105,7 @@ void interrupt_register_handler(uint8_t number, interrupt_handler_t handler)
  * In Java un'eccezione non catturata termina il thread con uno stack trace;
  * qui il "thread" è l'intero sistema operativo.
  */
-static void panic_on_exception(struct registers *regs)
+void interrupt_panic(struct registers *regs)
 {
     /* `regs->eip` è la scorciatoia per `(*regs).eip`: accede al campo di una struct
      * attraverso un puntatore. In Java si scrive sempre `.` perché ogni oggetto è
@@ -142,7 +163,7 @@ void interrupt_dispatch(struct registers *regs)
         handler(regs);
     } else if (regs->int_no < 32) {
         /* Un'eccezione senza gestore è un bug del kernel. */
-        panic_on_exception(regs);
+        interrupt_panic(regs);
     }
 }
 

@@ -17,6 +17,7 @@
 #include "drivers/pic.h"
 #include "drivers/io.h"
 #include "kernel/interrupts.h"
+#include "proc/scheduler.h"
 
 #define PIT_CHANNEL0     0x40       /* porta dati del canale 0 (quello collegato all'IRQ 0) */
 #define PIT_COMMAND      0x43       /* porta comandi                                        */
@@ -41,6 +42,19 @@ static void timer_handler(struct registers *regs)
 {
     (void) regs;
     ticks++;
+
+    /*
+     * Il cuore del multitasking con prelazione: a ogni tick lo scheduler controlla
+     * se il processo in esecuzione ha esaurito il suo quanto di tempo e, nel caso,
+     * passa la CPU a un altro.
+     *
+     * Attenzione a cosa significa: questa chiamata può "ritornare" molto più tardi,
+     * dopo che hanno girato altri processi. Il processo interrotto resta congelato
+     * qui dentro, a metà del gestore dell'interrupt, con i suoi registri al sicuro
+     * sul suo stack (li ha salvati interrupt_common). Quando verrà scelto di nuovo
+     * riprenderà da qui, uscirà dal gestore con `iret` e continuerà ignaro di tutto.
+     */
+    scheduler_tick();
 }
 
 void timer_init(void)
