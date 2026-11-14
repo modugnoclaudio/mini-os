@@ -184,6 +184,7 @@ Memoria: tutte le prove superate
 >>> TEST OK: avvio, eccezioni, memoria e timer funzionano
 ```
 Tutte le righe di prova devono iniziare con `ok:`. Nessuna riga deve contenere `ERRORE`.
+(Dalla fase 4 l'output prosegue con le prove dei processi e il messaggio finale è diverso: vedi `docs/notes/fase4-processi.md`.)
 
 Con `make run` le righe sono più delle 25 dello schermo: le prime scorrono via.
 È normale; l'output completo si legge nel terminale.
