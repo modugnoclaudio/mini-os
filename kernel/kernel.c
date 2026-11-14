@@ -15,6 +15,9 @@
 #include "kernel/interrupts.h"
 #include "drivers/timer.h"
 #include "drivers/keyboard.h"
+#include "kernel/multiboot.h"
+#include "mm/pmm.h"
+#include "mm/memtest.h"
 
 /* Il valore che un bootloader Multiboot mette in EAX prima di saltare al kernel. */
 #define MULTIBOOT_BOOTLOADER_MAGIC 0x2BADB002
@@ -46,8 +49,8 @@ static void halt(void)
  * Chiamata da _start in boot/boot.asm con due argomenti messi sullo stack:
  *   magic          = numero magico Multiboot (era nel registro EAX)
  *   multiboot_info = indirizzo fisico della struttura con le info di sistema (era in EBX).
- *                    Per ora lo teniamo come semplice numero; lo useremo nella fase 3
- *                    per leggere la mappa della memoria.
+ *                    Arriva come semplice numero: più sotto lo convertiamo in un
+ *                    puntatore per leggere la mappa della memoria.
  */
 void kernel_main(uint32_t magic, uint32_t multiboot_info)
 {
@@ -87,6 +90,17 @@ void kernel_main(uint32_t magic, uint32_t multiboot_info)
      * funzionano, il gestore stampa un messaggio e l'esecuzione prosegue qui sotto. */
     __asm__ volatile ("int3");
     kprintf("Ritorno dall'eccezione riuscito\n");
+
+    /* --- Fase 3: gestione della memoria --- */
+
+    /* Il cast dice al compilatore: "a questo indirizzo c'è una struct multiboot_info".
+     * Non copia nulla: cambia solo il modo in cui leggiamo quei byte. */
+    struct multiboot_info *mbi = (struct multiboot_info *) multiboot_info;
+
+    pmm_init(mbi);
+    memtest_pmm();
+
+    memtest_summary();
 
     timer_init();
     kprintf("Timer a %d Hz\n", TIMER_HZ);
