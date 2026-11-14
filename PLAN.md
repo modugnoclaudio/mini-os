@@ -18,7 +18,7 @@ Dopo quella data si continua con Opus 5.5.
 | 0 | Ambiente: WSL2, gcc, nasm, QEMU, GDB, Makefile, repo | mer 11 | ✅ fatta |
 | 1 | Boot Multiboot, output VGA e seriale, `kprintf` | mer 11 | ✅ fatta |
 | 2 | GDT, IDT, eccezioni, PIC, timer, tastiera | gio 12 | ✅ fatta |
-| 3 | Memoria: allocatore fisico (bitmap), paginazione, heap `kmalloc` | ven 13 | ⬜ da fare |
+| 3 | Memoria: allocatore fisico (bitmap), paginazione, heap `kmalloc` | ven 13 | ✅ fatta |
 | 4 | Processi: PCB, context switch, scheduler round-robin | sab 14 | ⬜ da fare |
 | 5 | Syscall (`int 0x80`) e programmi in user mode | dom 15 | ⬜ da fare |
 | 6 | Filesystem in RAM e shell (`ls`, `cat`, `ps`, `run`) | lun 16 | ⬜ da fare |
@@ -27,13 +27,14 @@ Dopo quella data si continua con Opus 5.5.
 Legenda: ⬜ da fare · 🟨 in corso · ✅ fatta · ⚠️ fatta con problemi noti
 
 ## Prossimo passo
-Fase 3: memoria — allocatore fisico (bitmap), paginazione, heap `kmalloc`.
-Primo passo concreto: leggere la mappa della memoria dalla struttura Multiboot
-(il puntatore `multiboot_info` che `kernel_main` già riceve) e stampare le zone di RAM libere;
-poi l'allocatore di pagine fisiche a bitmap, che parte da `kernel_end`.
+Fase 4: processi — PCB, context switch, scheduler round-robin.
+Primo passo concreto: thread del kernel. Definire il PCB (`struct process` in `proc/`),
+allocarlo con `kmalloc` insieme a uno stack proprio, e scrivere in assembly il
+context switch tra due thread che si cedono la CPU volontariamente.
+Solo dopo: agganciare lo scheduler round-robin all'interrupt del timer (`drivers/timer.c`).
 
-Prima di iniziare, sul PC (WSL2): verificare `make test` e provare la tastiera con `make run`
-(vedi "Come provarlo" in `docs/notes/fase2-interrupt.md`).
+Da ricordare per la fase 5 (programmi utente): ogni processo avrà la sua page directory,
+e le mappature del kernel (identità e heap) dovranno comparire uguali in tutte.
 
 ## Struttura del repository
 ```
@@ -76,6 +77,15 @@ docs/
 | 11/11 | Timer PIT a 100 Hz (`TIMER_HZ`) | Un tick = 10 ms, facile da convertire; base per il quanto di tempo dello scheduler |
 | 11/11 | Tastiera con layout US, eco diretto dal gestore, tasti estesi ignorati | Minimo indispensabile; buffer dei tasti rimandato alla shell (fase 6) |
 | 11/11 | Eccezione senza gestore = kernel panic con stampa dei registri | Non esistono ancora processi da terminare singolarmente |
+| 14/11 | PMM: bitmap fissa di 32 KiB nella `.bss`, RAM gestita fino a 1 GiB (`PMM_MAX_MEMORY`), primo MiB mai distribuito | Niente da piazzare a mano in memoria; il primo MiB contiene BIOS, video e dati Multiboot |
+| 14/11 | Voci della mappa Multiboot lette come coppie di `uint32_t` (metà bassa e alta) | Evita l'aritmetica a 64 bit, che a 32 bit richiederebbe funzioni di supporto di libgcc |
+| 14/11 | Tutta la RAM mappata in identità (virtuale = fisico); niente kernel "higher half" | Il kernel scrive in qualsiasi pagina fisica, page table comprese, usandone l'indirizzo |
+| 14/11 | Pagina 0 non mappata | Un puntatore nullo diventa un page fault invece di una lettura silenziosa |
+| 14/11 | Layout virtuale: `0`–`1 GiB` kernel in identità; `0xD0000000`–`0xD1000000` heap del kernel; in mezzo spazio per i programmi utente | Zone separate e fisse, facili da riconoscere in un indirizzo |
+| 14/11 | Heap: lista di blocchi con header di 16 byte, first fit, divisione e fusione; cresce a richiesta, non si restringe | La versione più semplice che mostri davvero frammentazione e coalescenza |
+| 14/11 | Page fault = sempre kernel panic (con indirizzo da `CR2` e causa) | Nessun demand paging né swap in programma |
+| 14/11 | Prove all'avvio in `mm/memtest.c`; `make test` fallisce se compare `ERRORE` | Ogni livello della memoria è verificato a ogni avvio |
+| 14/11 | `memset` / `memcpy` in `lib/string.c` con i nomi standard | gcc può inserire chiamate a queste funzioni di sua iniziativa |
 
 ## Problemi noti
 _(nessun bug aperto)_
@@ -88,6 +98,12 @@ _(nessun bug aperto)_
 - 11/11 — `kprintf` non è protetta dagli interrupt: l'eco di un tasto può finire in mezzo a una riga stampata dal ciclo principale. Innocuo per ora; da sistemare quando ci saranno più processi (fase 4).
 - 11/11 — Tastiera: layout solo US (simboli e accentate non corrispondono a una tastiera italiana); frecce e altri tasti estesi ignorati; niente Caps Lock né Ctrl/Alt.
 - 11/11 — PIC: gli interrupt "spuri" (IRQ 7 e 15) non sono trattati in modo speciale. In QEMU non si presentano.
+- 14/11 — La fase 3 è stata provata solo nel container (QEMU con 16, 128, 512 e 2048 MiB di RAM), non ancora su WSL2. Le fasi 0-2 invece sono state confermate dall'autore sul suo PC.
+- 14/11 — L'output di avvio supera le 25 righe: sullo schermo VGA le prime scorrono via. Si legge per intero sulla seriale.
+- 14/11 — PMM: `pmm_alloc_page` fa una ricerca lineare dall'inizio a ogni chiamata (lenta con memoria quasi piena); alloca solo una pagina alla volta, non zone contigue.
+- 14/11 — Heap: non restituisce mai le pagine al PMM; il riconoscimento del double free si basa sull'header e può sfuggire se il blocco è stato riassegnato; nessuna protezione contro scritture oltre la fine di un blocco.
+- 14/11 — PMM, paginazione e heap non sono protetti dagli interrupt: oggi nessun gestore di interrupt li usa, ma dalla fase 4 serviranno sezioni critiche.
+- 14/11 — La struttura Multiboot viene letta solo in `pmm_init`; se in futuro servirà dopo (es. moduli), con un bootloader diverso da QEMU potrebbe trovarsi fuori dal primo MiB e non essere protetta.
 - 11/11 — `kprintf` non supporta larghezza/riempimento (es. `%08x`) né `%u`: da aggiungere quando serviranno.
 
 ## Registro delle sessioni
@@ -96,3 +112,4 @@ _(nessun bug aperto)_
 | 11/11 | — | Scelta del progetto, preparati CLAUDE.md, PLAN.md, NOTES_TEMPLATE.md |
 | 11/11 | Fable 5.2 | Fase 0 (struttura, `Makefile`, `linker.ld`, verifica toolchain) e Fase 1 (boot Multiboot, driver VGA e seriale, `kprintf`). `make test` passa. Scritta `docs/notes/fase1-boot.md` |
 | 11/11 | Fable 5.2 | Corretto `make test` che si bloccava su WSL2. Fase 2 completa in quattro passi: GDT, IDT ed eccezioni, PIC e timer, tastiera. `make test` passa. Scritta `docs/notes/fase2-interrupt.md` |
+| 14/11 | Fable 5.2 | Fase 3 completa in tre passi: mappa Multiboot e allocatore fisico a bitmap, paginazione con RAM in identità e gestore dei page fault, heap con `kmalloc`/`kfree`. Prove automatiche in `mm/memtest.c`. `make test` passa. Scritta `docs/notes/fase3-memoria.md` |

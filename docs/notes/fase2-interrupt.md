@@ -203,6 +203,7 @@ Timer: 3 s dall'avvio
 >>> TEST OK: avvio, eccezioni e timer funzionano
 ```
 (Gli indirizzi possono cambiare leggermente se il codice viene modificato.)
+(Dalla fase 3 l'output è più lungo e il messaggio finale è diverso: vedi `docs/notes/fase3-memoria.md`.)
 
 **Tastiera:** `make run`, clicca nella finestra di QEMU e scrivi. Le lettere compaiono
 sotto l'ultima riga, Shift dà le maiuscole, Backspace cancella, Invio va a capo.
