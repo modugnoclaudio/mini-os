@@ -20,6 +20,9 @@
 #include "mm/paging.h"
 #include "mm/kheap.h"
 #include "mm/memtest.h"
+#include "proc/process.h"
+#include "proc/scheduler.h"
+#include "proc/proctest.h"
 
 /* Il valore che un bootloader Multiboot mette in EAX prima di saltare al kernel. */
 #define MULTIBOOT_BOOTLOADER_MAGIC 0x2BADB002
@@ -120,6 +123,15 @@ void kernel_main(uint32_t magic, uint32_t multiboot_info)
      * quando tabelle e gestori sono tutti al loro posto. */
     interrupts_enable();
     kprintf("Interrupt abilitati\n");
+
+    /* --- Fase 4: processi --- */
+
+    /* Da questo momento il codice che stiamo eseguendo È il processo 0. */
+    process_init();
+    kprintf("Processi inizializzati: kernel_main e' il processo 0 (idle)\n");
+
+    proctest_cooperative();
+    proctest_summary();
 
     /*
      * Ciclo principale ("idle loop"). `hlt` addormenta la CPU fino al prossimo

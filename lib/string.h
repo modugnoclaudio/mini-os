@@ -35,4 +35,9 @@ void *memcpy(void *destination, const void *source, uint32_t count);
  */
 void string_copy(char *destination, const char *source, uint32_t size);
 
+/* Restituisce 1 se le due stringhe hanno gli stessi caratteri, 0 altrimenti.
+ * In C `a == b` tra due stringhe confronta gli INDIRIZZI, non il contenuto
+ * (come `==` tra due String in Java): serve una funzione, come `equals`. */
+int string_equals(const char *a, const char *b);
+
 #endif /* LIB_STRING_H */

@@ -47,3 +47,15 @@ void string_copy(char *destination, const char *source, uint32_t size)
 
     destination[i] = '\0';     /* una stringa C deve sempre finire con lo zero */
 }
+
+int string_equals(const char *a, const char *b)
+{
+    /* Avanza finché i caratteri coincidono e nessuna delle due stringhe è finita. */
+    while (*a != '\0' && *a == *b) {
+        a++;
+        b++;
+    }
+
+    /* Sono uguali solo se ci siamo fermati alla fine di ENTRAMBE. */
+    return *a == *b;
+}
