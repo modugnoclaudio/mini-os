@@ -32,3 +32,18 @@ void *memcpy(void *destination, const void *source, uint32_t count)
 
     return destination;
 }
+
+void string_copy(char *destination, const char *source, uint32_t size)
+{
+    if (size == 0) {
+        return;
+    }
+
+    uint32_t i = 0;
+    while (i < size - 1 && source[i] != '\0') {
+        destination[i] = source[i];
+        i++;
+    }
+
+    destination[i] = '\0';     /* una stringa C deve sempre finire con lo zero */
+}

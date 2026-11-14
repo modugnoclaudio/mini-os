@@ -29,6 +29,7 @@
 #include "mm/pmm.h"
 #include "lib/kprintf.h"
 #include "lib/string.h"
+#include "kernel/interrupts.h"
 
 /* Numero massimo di frame: 1 GiB / 4 KiB = 262144. */
 #define MAX_FRAMES (PMM_MAX_MEMORY / PAGE_SIZE)
@@ -197,7 +198,9 @@ void pmm_init(struct multiboot_info *mbi)
  * Allocazione e rilascio
  * --------------------------------------------------------------------------- */
 
-uint32_t pmm_alloc_page(void)
+/* Le versioni "unlocked" fanno il lavoro; quelle pubbliche, più sotto, le avvolgono
+ * in una sezione critica (la bitmap è condivisa: vedi la spiegazione in mm/kheap.c). */
+static uint32_t pmm_alloc_page_unlocked(void)
 {
     uint32_t frame_count = memory_top / PAGE_SIZE;
 
@@ -222,7 +225,7 @@ uint32_t pmm_alloc_page(void)
     return 0;   /* memoria esaurita */
 }
 
-void pmm_free_page(uint32_t address)
+static void pmm_free_page_unlocked(uint32_t address)
 {
     uint32_t frame = address / PAGE_SIZE;
 
@@ -242,6 +245,21 @@ void pmm_free_page(uint32_t address)
 
     frame_set_free(frame);
     free_pages++;
+}
+
+uint32_t pmm_alloc_page(void)
+{
+    uint32_t flags = interrupts_save_and_disable();
+    uint32_t address = pmm_alloc_page_unlocked();
+    interrupts_restore(flags);
+    return address;
+}
+
+void pmm_free_page(uint32_t address)
+{
+    uint32_t flags = interrupts_save_and_disable();
+    pmm_free_page_unlocked(address);
+    interrupts_restore(flags);
 }
 
 uint32_t pmm_get_free_pages(void)

@@ -39,6 +39,7 @@
 #include "mm/pmm.h"
 #include "mm/paging.h"
 #include "lib/kprintf.h"
+#include "kernel/interrupts.h"
 
 /* Numero "magico" scritto in ogni header: se non lo ritroviamo, vuol dire che il
  * puntatore non viene da kmalloc oppure che qualcuno ha scritto fuori dal proprio
@@ -209,7 +210,9 @@ void kheap_init(void)
             KHEAP_START, KHEAP_MAX_SIZE / (1024 * 1024));
 }
 
-void *kmalloc(uint32_t size)
+/* La kmalloc vera e propria. "unlocked" = senza protezione: va chiamata solo
+ * dall'interno di una sezione critica (lo fa kmalloc, più sotto). */
+static void *kmalloc_unlocked(uint32_t size)
 {
     if (size == 0) {
         return 0;
@@ -239,7 +242,8 @@ void *kmalloc(uint32_t size)
     return (void *) (block + 1);
 }
 
-void kfree(void *pointer)
+/* La kfree vera e propria, senza protezione (vedi kmalloc_unlocked). */
+static void kfree_unlocked(void *pointer)
 {
     if (pointer == 0) {
         return;
@@ -263,6 +267,34 @@ void kfree(void *pointer)
 
     block->is_free = 1;
     merge_free_blocks();
+}
+
+/*
+ * Le due funzioni pubbliche: avvolgono quelle vere in una SEZIONE CRITICA.
+ *
+ * Perché serve: la lista dei blocchi è condivisa da tutti i processi. Se il timer
+ * togliesse la CPU a un processo a metà di una kmalloc (per esempio dopo aver
+ * tagliato un blocco ma prima di averlo agganciato alla lista) e il processo
+ * successivo chiamasse kmalloc anche lui, troverebbe la lista rotta.
+ * È la "race condition" (corsa critica) vista a lezione.
+ *
+ * Su una macchina con una sola CPU, spegnere gli interrupt è il modo più semplice
+ * di ottenere la mutua esclusione: nessuno può interromperci. In Java sarebbe un
+ * metodo `synchronized`.
+ */
+void *kmalloc(uint32_t size)
+{
+    uint32_t flags = interrupts_save_and_disable();
+    void *result = kmalloc_unlocked(size);
+    interrupts_restore(flags);
+    return result;
+}
+
+void kfree(void *pointer)
+{
+    uint32_t flags = interrupts_save_and_disable();
+    kfree_unlocked(pointer);
+    interrupts_restore(flags);
 }
 
 void kheap_dump(void)

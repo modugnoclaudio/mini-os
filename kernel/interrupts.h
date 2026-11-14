@@ -66,4 +66,21 @@ void interrupt_panic(struct registers *regs);
 void interrupts_enable(void);
 void interrupts_disable(void);
 
+/*
+ * Coppia di funzioni per le SEZIONI CRITICHE: tratti di codice che non devono essere
+ * interrotti a metà, perché lasciano per un attimo una struttura dati in uno stato
+ * incoerente (es. una lista con un nodo agganciato solo per metà).
+ *
+ *     uint32_t flags = interrupts_save_and_disable();
+ *     ... codice che non deve essere interrotto ...
+ *     interrupts_restore(flags);
+ *
+ * Perché "salva e ripristina" e non semplicemente cli/sti? Perché le sezioni critiche
+ * possono essere annidate (kmalloc chiama kprintf...): quella interna non deve
+ * riaccendere gli interrupt che quella esterna vuole ancora spenti. Si rimette
+ * quindi lo stato che c'era PRIMA, qualunque fosse.
+ */
+uint32_t interrupts_save_and_disable(void);
+void interrupts_restore(uint32_t flags);
+
 #endif /* KERNEL_INTERRUPTS_H */

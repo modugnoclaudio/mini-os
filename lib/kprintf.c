@@ -14,6 +14,7 @@
 #include "lib/kprintf.h"
 #include "drivers/vga.h"
 #include "drivers/serial.h"
+#include "kernel/interrupts.h"
 
 /* Ogni carattere del kernel passa da qui e va su ENTRAMBE le uscite. */
 void kputchar(char c)
@@ -96,22 +97,13 @@ static void print_signed(int32_t value)
     }
 }
 
-void kprintf(const char *format, ...)
+/*
+ * Il lavoro vero: interpreta la stringa di formato e stampa.
+ * Riceve gli argomenti variabili già "impacchettati" in una va_list, così può
+ * essere chiamata da kprintf qui sotto.
+ */
+static void print_formatted(const char *format, va_list args)
 {
-    /*
-     * Argomenti variabili. In Java `Object... args` è un vero array, con lunghezza e
-     * tipi. In C no: gli argomenti extra sono semplicemente appoggiati sullo stack uno
-     * dopo l'altro, e NESSUNO sa quanti sono né di che tipo. Lo deduciamo dalla stringa
-     * di formato: per questo un `%s` a cui passi un numero manda in crash il kernel.
-     *
-     *   va_list args          = un "cursore" sugli argomenti extra
-     *   va_start(args, format) = posiziona il cursore dopo l'ultimo parametro fisso
-     *   va_arg(args, tipo)     = legge il prossimo argomento come `tipo` e avanza
-     *   va_end(args)           = chiusura (obbligatoria per lo standard)
-     */
-    va_list args;
-    va_start(args, format);
-
     /* Scorriamo la stringa di formato un carattere alla volta. */
     for (const char *p = format; *p != '\0'; p++) {
 
@@ -152,7 +144,6 @@ void kprintf(const char *format, ...)
              * e usciamo, altrimenti il p++ del for salterebbe oltre la fine della
              * stringa e leggeremmo memoria a caso. */
             kputchar('%');
-            va_end(args);
             return;
 
         default:
@@ -162,6 +153,34 @@ void kprintf(const char *format, ...)
             break;
         }
     }
+}
+
+void kprintf(const char *format, ...)
+{
+    /*
+     * Argomenti variabili. In Java `Object... args` è un vero array, con lunghezza e
+     * tipi. In C no: gli argomenti extra sono semplicemente appoggiati sullo stack uno
+     * dopo l'altro, e NESSUNO sa quanti sono né di che tipo. Lo deduciamo dalla stringa
+     * di formato: per questo un `%s` a cui passi un numero manda in crash il kernel.
+     *
+     *   va_list args          = un "cursore" sugli argomenti extra
+     *   va_start(args, format) = posiziona il cursore dopo l'ultimo parametro fisso
+     *   va_arg(args, tipo)     = legge il prossimo argomento come `tipo` e avanza
+     *   va_end(args)           = chiusura (obbligatoria per lo standard)
+     */
+    va_list args;
+    va_start(args, format);
+
+    /*
+     * SEZIONE CRITICA: una kprintf viene eseguita tutta d'un fiato, a interrupt
+     * spenti. Altrimenti il timer potrebbe passare la CPU a un altro processo a metà
+     * riga, e i caratteri dei due si mescolerebbero sullo schermo (lo schermo e la
+     * posizione del cursore sono una risorsa condivisa).
+     * La seriale funziona lo stesso: lavora a polling, non a interrupt.
+     */
+    uint32_t flags = interrupts_save_and_disable();
+    print_formatted(format, args);
+    interrupts_restore(flags);
 
     va_end(args);
 }

@@ -26,4 +26,13 @@ void *memset(void *destination, int value, uint32_t count);
 /* Copia `count` byte da `source` a `destination`. Le due zone NON devono sovrapporsi. */
 void *memcpy(void *destination, const void *source, uint32_t count);
 
+/*
+ * Copia la stringa `source` in `destination`, che ha spazio per `size` byte in tutto.
+ * Copia al massimo size - 1 caratteri e aggiunge SEMPRE il terminatore '\0':
+ * se la stringa è troppo lunga viene troncata, ma non si scrive mai fuori dal buffer.
+ * (La `strcpy` della libreria standard non fa questo controllo: è una delle cause
+ * più famose di falle di sicurezza, il "buffer overflow".)
+ */
+void string_copy(char *destination, const char *source, uint32_t size);
+
 #endif /* LIB_STRING_H */
