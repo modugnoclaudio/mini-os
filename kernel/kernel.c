@@ -13,6 +13,7 @@
 #include "lib/kprintf.h"
 #include "kernel/gdt.h"
 #include "kernel/interrupts.h"
+#include "kernel/syscall.h"
 #include "drivers/timer.h"
 #include "drivers/keyboard.h"
 #include "kernel/multiboot.h"
@@ -86,9 +87,10 @@ void kernel_main(uint32_t magic, uint32_t multiboot_info)
 
     /* --- Fase 2: tabelle della CPU e interrupt --- */
     gdt_init();
-    kprintf("GDT caricata\n");
+    kprintf("GDT caricata (segmenti kernel e utente, TSS)\n");
 
     interrupts_init();
+    syscall_init();
     kprintf("IDT caricata, PIC rimappato\n");
 
     /* Prova: `int3` genera apposta l'eccezione 3. Se IDT, stub e ritorno con `iret`
@@ -132,6 +134,7 @@ void kernel_main(uint32_t magic, uint32_t multiboot_info)
 
     proctest_cooperative();
     proctest_preemptive();
+    proctest_syscalls();
     proctest_summary();
 
     /*

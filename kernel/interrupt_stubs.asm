@@ -92,6 +92,11 @@ STUB_SENZA_ERRORE 45
 STUB_SENZA_ERRORE 46
 STUB_SENZA_ERRORE 47
 
+; --- Chiamate di sistema: interrupt 128 (0x80), invocato dai programmi con `int 0x80` ---
+; Non fa parte della tabella dei 48 stub qui sotto: kernel/idt.c lo aggancia a parte.
+global interrupt_stub_128
+STUB_SENZA_ERRORE 128
+
 ; ---------------------------------------------------------------------------
 ; Codice comune a tutti gli interrupt
 ; ---------------------------------------------------------------------------

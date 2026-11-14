@@ -50,6 +50,7 @@ void process_init(void)
     idle->quantum_left = SCHEDULER_QUANTUM;
     idle->cpu_ticks = 0;
     idle->wake_tick = 0;
+    idle->exit_code = 0;
     idle->next = idle;                  /* lista circolare con un solo elemento: punta a sé */
 
     idle_process = idle;
@@ -73,7 +74,7 @@ static void process_trampoline(void)
 
     /* Se la funzione del processo ritorna, il processo è finito. Non può esserci un
      * `return` da qui: sullo stack non c'è nessun indirizzo a cui tornare. */
-    process_exit();
+    process_exit(0);
 }
 
 struct process *process_create(const char *name, void (*entry)(void))
@@ -97,6 +98,7 @@ struct process *process_create(const char *name, void (*entry)(void))
     process->quantum_left = SCHEDULER_QUANTUM;
     process->cpu_ticks = 0;
     process->wake_tick = 0;
+    process->exit_code = 0;
 
     /*
      * IL TRUCCO DELLO STACK INIZIALE.
@@ -147,7 +149,7 @@ struct process *process_create(const char *name, void (*entry)(void))
     return process;
 }
 
-void process_exit(void)
+void process_exit(int32_t exit_code)
 {
     /* Il processo 0 non può terminare: serve sempre qualcuno che possa girare. */
     if (current_process == idle_process) {
@@ -163,6 +165,7 @@ void process_exit(void)
      * CPU per sempre; a fare pulizia sarà il processo 0 (process_reap_terminated).
      * Nei sistemi Unix un processo in questo stato si chiama "zombie".
      */
+    current_process->exit_code = exit_code;
     current_process->state = PROCESS_TERMINATED;
     schedule();
 

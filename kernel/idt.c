@@ -45,6 +45,15 @@ struct idt_pointer {
  */
 #define IDT_INTERRUPT_GATE 0x8E
 
+/*
+ * Tipo di gate 0xEE = 1110 1110: identico, ma con privilegio richiesto 11 (3).
+ * Significa: "anche un programma utente può invocare questo interrupt con `int`".
+ * Lo usiamo per UNA SOLA riga, quella delle syscall. Tutte le altre restano a 0:
+ * se un programma utente provasse `int 14` per simulare un page fault, la CPU
+ * rifiuterebbe con un general protection fault.
+ */
+#define IDT_USER_GATE 0xEE
+
 /* Le variabili globali `static` non inizializzate partono a zero (stanno nella .bss):
  * tutte le 256 righe nascono quindi "non presenti". */
 static struct idt_entry   idt[IDT_ENTRIES];
@@ -53,14 +62,18 @@ static struct idt_pointer idt_ptr;
 /* Definita in kernel/interrupt_stubs.asm: gli indirizzi dei 48 stub in assembly. */
 extern uint32_t interrupt_stub_table[INTERRUPT_STUB_COUNT];
 
-/* Scrive nella riga `number` l'indirizzo `handler`. */
-static void idt_set_gate(int number, uint32_t handler)
+/* Lo stub della syscall, anche lui in kernel/interrupt_stubs.asm. Dichiararlo come
+ * funzione serve solo a poterne prendere l'indirizzo: dal C non lo chiamiamo mai. */
+extern void interrupt_stub_128(void);
+
+/* Scrive nella riga `number` l'indirizzo `handler`, con il tipo di gate indicato. */
+static void idt_set_gate(int number, uint32_t handler, uint8_t type_attr)
 {
     idt[number].offset_low  = (uint16_t) (handler & 0xFFFF);
     idt[number].offset_high = (uint16_t) ((handler >> 16) & 0xFFFF);
     idt[number].selector    = GDT_KERNEL_CODE;
     idt[number].zero        = 0;
-    idt[number].type_attr   = IDT_INTERRUPT_GATE;
+    idt[number].type_attr   = type_attr;
 }
 
 void idt_init(void)
@@ -69,8 +82,11 @@ void idt_init(void)
      * presente"): se arrivasse uno di quegli interrupt, la CPU genererebbe
      * un'eccezione 13 (general protection fault), che noi gestiamo. */
     for (int i = 0; i < INTERRUPT_STUB_COUNT; i++) {
-        idt_set_gate(i, interrupt_stub_table[i]);
+        idt_set_gate(i, interrupt_stub_table[i], IDT_INTERRUPT_GATE);
     }
+
+    /* La porta d'ingresso nel kernel per i programmi utente. */
+    idt_set_gate(INT_SYSCALL, (uint32_t) interrupt_stub_128, IDT_USER_GATE);
 
     idt_ptr.limit = sizeof(idt) - 1;
     idt_ptr.base  = (uint32_t) &idt;

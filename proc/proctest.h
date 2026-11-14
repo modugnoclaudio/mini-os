@@ -14,6 +14,9 @@ void proctest_cooperative(void);
 /* Due processi che non cedono mai la CPU (il timer gliela toglie) e uno che dorme. */
 void proctest_preemptive(void);
 
+/* Il meccanismo delle syscall (int 0x80), provato dal kernel stesso. */
+void proctest_syscalls(void);
+
 /* Stampa il riepilogo finale: quante verifiche sono fallite in tutto. */
 void proctest_summary(void);
 

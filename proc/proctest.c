@@ -16,6 +16,7 @@
 #include "proc/scheduler.h"
 #include "kernel/interrupts.h"
 #include "mm/kheap.h"
+#include "kernel/syscall_numbers.h"
 #include "lib/kprintf.h"
 #include "lib/string.h"
 
@@ -270,6 +271,39 @@ void proctest_preemptive(void)
      * l'heap deve essere tornato esattamente com'era. */
     check("nessun memory leak: l'heap e' tornato come prima",
           kheap_get_used_bytes() == heap_used_before);
+}
+
+/* ---------------------------------------------------------------------------
+ * Prova 3: il meccanismo delle syscall
+ * ---------------------------------------------------------------------------
+ * Le syscall sono pensate per i programmi utente, ma `int 0x80` si può eseguire
+ * anche dal kernel: è un modo semplice di provare il percorso
+ * IDT -> stub -> tabella delle syscall -> valore di ritorno in EAX
+ * prima di avere dei veri programmi utente.
+ */
+
+/* Esegue una syscall con un argomento e ne restituisce il risultato.
+ * "a"(number) mette il numero in EAX, "b"(argument) l'argomento in EBX;
+ * "=a"(result) legge il risultato da EAX dopo l'interrupt. */
+static int32_t do_syscall(uint32_t number, uint32_t argument)
+{
+    int32_t result;
+    __asm__ volatile ("int $0x80"
+                      : "=a"(result)
+                      : "a"(number), "b"(argument)
+                      : "memory");
+    return result;
+}
+
+void proctest_syscalls(void)
+{
+    kprintf("Prova delle syscall (int 0x80):\n");
+
+    check("getpid dal processo 0 restituisce 0",
+          do_syscall(SYS_GETPID, 0) == (int32_t) current_process->pid);
+    check("una syscall con numero inesistente restituisce -1",
+          do_syscall(9999, 0) == -1);
+    check("yield ritorna normalmente", do_syscall(SYS_YIELD, 0) == 0);
 }
 
 void proctest_summary(void)

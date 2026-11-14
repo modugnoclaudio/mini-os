@@ -26,7 +26,7 @@
  * dell'interrupt. Una casella a 0 (puntatore nullo) significa "nessun gestore".
  * Essendo `static` e non inizializzato, parte tutto a zero.
  */
-static interrupt_handler_t handlers[INTERRUPT_STUB_COUNT];
+static interrupt_handler_t handlers[INTERRUPT_HANDLER_COUNT];
 
 /* Nomi delle eccezioni della CPU, per messaggi di errore leggibili.
  * È un array di stringhe: ogni elemento è un `const char *` (puntatore al primo carattere). */
@@ -93,9 +93,8 @@ void interrupts_restore(uint32_t flags)
 
 void interrupt_register_handler(uint8_t number, interrupt_handler_t handler)
 {
-    if (number < INTERRUPT_STUB_COUNT) {
-        handlers[number] = handler;
-    }
+    /* `number` è un uint8_t: vale al massimo 255, quindi non può uscire dall'array. */
+    handlers[number] = handler;
 }
 
 /*
@@ -153,7 +152,7 @@ void interrupt_dispatch(struct registers *regs)
      * in kernel/idt.c). Farlo prima ci tornerà utile nella fase 4: il gestore del
      * timer potrà cambiare processo senza "dimenticarsi" la conferma.
      */
-    if (regs->int_no >= INT_IRQ_BASE) {
+    if (regs->int_no >= INT_IRQ_BASE && regs->int_no < INT_IRQ_BASE + 16) {
         pic_send_eoi((uint8_t) (regs->int_no - INT_IRQ_BASE));
     }
 

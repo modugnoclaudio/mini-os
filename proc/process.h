@@ -60,6 +60,8 @@ struct process {
     uint32_t cpu_ticks;                 /* tick di CPU consumati in totale              */
     uint32_t wake_tick;                 /* se dorme: a quale tick va svegliato          */
 
+    int32_t exit_code;                  /* valore con cui il processo è terminato       */
+
     struct process *next;               /* prossimo PCB: la lista è CIRCOLARE           */
 };
 
@@ -78,8 +80,9 @@ void process_init(void);
 /* Crea un nuovo processo che eseguirà `entry`. Restituisce il PCB, o 0 se manca memoria. */
 struct process *process_create(const char *name, void (*entry)(void));
 
-/* Termina il processo corrente. Non ritorna mai. */
-void process_exit(void);
+/* Termina il processo corrente con il codice indicato (per convenzione 0 = tutto
+ * bene, come il valore restituito dal main in C o System.exit in Java). Non ritorna mai. */
+void process_exit(int32_t exit_code);
 
 /* Libera la memoria dei processi terminati. La chiama il processo 0. */
 void process_reap_terminated(void);

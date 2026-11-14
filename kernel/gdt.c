@@ -18,6 +18,7 @@
 
 #include <stdint.h>
 #include "kernel/gdt.h"
+#include "lib/string.h"
 
 /*
  * Una riga della GDT ("descrittore di segmento"): 8 byte con un formato fissato da Intel.
@@ -46,9 +47,40 @@ struct gdt_pointer {
     uint32_t base;          /* indirizzo della prima riga               */
 } __attribute__((packed));
 
-/* Tre righe: nulla, codice kernel, dati kernel.
- * Nella fase 5 se ne aggiungeranno altre per la modalità utente. */
-#define GDT_ENTRIES 3
+/*
+ * Il TSS (Task State Segment). Intel lo aveva pensato per far fare il context switch
+ * direttamente alla CPU; nessun sistema operativo moderno lo usa così. Ne resta però
+ * obbligatorio UN uso, e solo due campi ci interessano: `ss0` ed `esp0`.
+ *
+ * IL PROBLEMA CHE RISOLVE: quando arriva un interrupt (o una syscall) mentre gira un
+ * programma utente, la CPU deve salvare i registri su uno stack. Non può fidarsi di
+ * quello dell'utente: potrebbe essere pieno, o puntare apposta dentro al kernel.
+ * Allora PRIMA cambia stack, e l'indirizzo di quello nuovo, sicuro, lo legge da qui:
+ * `ss0:esp0` = "stack da usare quando si entra nel livello di privilegio 0".
+ *
+ * COLLEGAMENTO CON LA TEORIA: è il motivo per cui ogni processo ha DUE stack, uno
+ * per la modalità utente e uno per la modalità kernel.
+ *
+ * Tutti gli altri campi restano a zero: vanno dichiarati solo perché la struttura
+ * abbia la dimensione e la forma che la CPU si aspetta.
+ */
+struct tss_entry {
+    uint32_t previous_tss;
+    uint32_t esp0;          /* cima dello stack del kernel del processo corrente */
+    uint32_t ss0;           /* segmento di quello stack: i dati del kernel       */
+    uint32_t esp1, ss1, esp2, ss2;
+    uint32_t cr3, eip, eflags;
+    uint32_t eax, ecx, edx, ebx, esp, ebp, esi, edi;
+    uint32_t es, cs, ss, ds, fs, gs;
+    uint32_t ldt;
+    uint16_t trap;
+    uint16_t iomap_base;    /* dove inizia la mappa dei permessi sulle porte di I/O */
+} __attribute__((packed));
+
+/* Sei righe: nulla, codice kernel, dati kernel, codice utente, dati utente, TSS. */
+#define GDT_ENTRIES 6
+
+static struct tss_entry tss;
 
 static struct gdt_entry   gdt[GDT_ENTRIES];
 static struct gdt_pointer gdt_ptr;
@@ -100,10 +132,49 @@ void gdt_init(void)
     gdt_set_entry(1, 0, 0xFFFFF, 0x9A, 0xC0);   /* 0x08: codice del kernel */
     gdt_set_entry(2, 0, 0xFFFFF, 0x92, 0xC0);   /* 0x10: dati del kernel   */
 
-    /* `sizeof(gdt)` = dimensione in byte dell'intero array (3 x 8 = 24).
+    /*
+     * I segmenti per i programmi utente sono identici a quelli del kernel (stessa
+     * base, stesso limite) tranne che per il livello di privilegio, DPL = 11 (3):
+     *
+     *   codice: 1111 1010 = 0xFA        dati: 1111 0010 = 0xF2
+     *
+     * È il registro CS a dire alla CPU "in che modalità siamo": con CS = segmento
+     * utente le istruzioni privilegiate (cli, hlt, in/out, caricare CR3...) sono
+     * vietate e provocano un'eccezione.
+     * COLLEGAMENTO CON LA TEORIA: sono i due "modi" della CPU, kernel e utente
+     * (su x86 si chiamano ring 0 e ring 3).
+     */
+    gdt_set_entry(3, 0, 0xFFFFF, 0xFA, 0xC0);   /* 0x18: codice utente */
+    gdt_set_entry(4, 0, 0xFFFFF, 0xF2, 0xC0);   /* 0x20: dati utente   */
+
+    /*
+     * Il TSS: prima lo azzeriamo, poi riempiamo i soli campi che usiamo.
+     * `esp0` verrà impostato dallo scheduler a ogni cambio di processo.
+     * `iomap_base` oltre la fine della struttura = "nessuna mappa": i programmi
+     * utente non possono usare nessuna porta di I/O.
+     */
+    memset(&tss, 0, sizeof(tss));
+    tss.ss0 = GDT_KERNEL_DATA;
+    tss.iomap_base = sizeof(tss);
+
+    /* La riga della GDT che descrive il TSS: qui base e limite contano davvero
+     * (indirizzo e dimensione della struttura). 0x89 = presente, tipo "TSS a 32 bit". */
+    gdt_set_entry(5, (uint32_t) &tss, sizeof(tss) - 1, 0x89, 0x00);
+
+    /* `sizeof(gdt)` = dimensione in byte dell'intero array (6 x 8 = 48).
      * `&gdt` = l'indirizzo dell'array; il cast lo trasforma in un numero a 32 bit. */
     gdt_ptr.limit = sizeof(gdt) - 1;
     gdt_ptr.base  = (uint32_t) &gdt;
 
     gdt_flush((uint32_t) &gdt_ptr);
+
+    /* `ltr` ("load task register") dice alla CPU quale riga della GDT contiene il TSS.
+     * Vuole il selettore in un registro a 16 bit. */
+    uint16_t tss_selector = GDT_TSS;
+    __asm__ volatile ("ltr %0" : : "r"(tss_selector));
+}
+
+void gdt_set_kernel_stack(uint32_t stack_top)
+{
+    tss.esp0 = stack_top;
 }
