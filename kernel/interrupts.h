@@ -61,6 +61,12 @@ void interrupts_init(void);
 /* Registra la funzione da chiamare quando arriva l'interrupt `number`. */
 void interrupt_register_handler(uint8_t number, interrupt_handler_t handler);
 
+/* Restituisce 1 se l'interrupt ha interrotto un programma utente, 0 se il kernel. */
+int interrupt_came_from_user(struct registers *regs);
+
+/* Il nome di un'eccezione della CPU (0-31), per i messaggi. */
+const char *interrupt_exception_name(uint32_t number);
+
 /* Stampa lo stato della CPU salvato in `regs` e ferma il sistema. Non ritorna mai.
  * Usata per le eccezioni che non si possono gestire. */
 void interrupt_panic(struct registers *regs);

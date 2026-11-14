@@ -17,6 +17,9 @@ void proctest_preemptive(void);
 /* Il meccanismo delle syscall (int 0x80), provato dal kernel stesso. */
 void proctest_syscalls(void);
 
+/* Programmi in modalità utente: esecuzione, memoria separata, protezione. */
+void proctest_user_programs(void);
+
 /* Stampa il riepilogo finale: quante verifiche sono fallite in tutto. */
 void proctest_summary(void);
 

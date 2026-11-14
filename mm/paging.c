@@ -46,6 +46,7 @@
 #include "mm/paging.h"
 #include "mm/pmm.h"
 #include "kernel/interrupts.h"
+#include "proc/process.h"
 #include "lib/kprintf.h"
 #include "lib/string.h"
 
@@ -357,6 +358,12 @@ static void page_fault_handler(struct registers *regs)
 
     if (fault_address < PAGE_SIZE) {
         kprintf("  (indirizzo nella pagina 0: quasi certamente un puntatore nullo)\n");
+    }
+
+    /* Colpa di un programma utente: si termina il processo e il sistema prosegue.
+     * Colpa del kernel: non resta che fermarsi. */
+    if (user) {
+        process_kill_current(regs);
     }
 
     interrupt_panic(regs);

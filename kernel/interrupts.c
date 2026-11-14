@@ -20,6 +20,7 @@
 #include "kernel/idt.h"
 #include "lib/kprintf.h"
 #include "drivers/pic.h"
+#include "proc/process.h"
 
 /*
  * La tabella dei gestori: un array di puntatori a funzione, indicizzato dal numero
@@ -68,6 +69,21 @@ void interrupts_disable(void)
 {
     /* `cli` = "clear interrupt flag": gli interrupt hardware restano in attesa. */
     __asm__ volatile ("cli");
+}
+
+int interrupt_came_from_user(struct registers *regs)
+{
+    /* I 2 bit più bassi del registro CS salvato sono il livello di privilegio del
+     * codice che è stato interrotto: 0 = kernel, 3 = utente. */
+    return (regs->cs & 0x3) == 3;
+}
+
+const char *interrupt_exception_name(uint32_t number)
+{
+    if (number < 32) {
+        return exception_names[number];
+    }
+    return "sconosciuta";
 }
 
 uint32_t interrupts_save_and_disable(void)
@@ -161,8 +177,16 @@ void interrupt_dispatch(struct registers *regs)
          * chiamata normale. */
         handler(regs);
     } else if (regs->int_no < 32) {
-        /* Un'eccezione senza gestore è un bug del kernel. */
-        interrupt_panic(regs);
+        /*
+         * Un'eccezione che nessuno gestisce. Conta CHI l'ha provocata:
+         *   - un programma utente: è un suo errore, si termina solo lui;
+         *   - il kernel: è un nostro bug, non ci si può più fidare di nulla -> panic.
+         */
+        if (interrupt_came_from_user(regs)) {
+            process_kill_current(regs);
+        } else {
+            interrupt_panic(regs);
+        }
     }
 }
 

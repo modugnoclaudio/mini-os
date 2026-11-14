@@ -77,6 +77,20 @@ OBJECTS := $(patsubst %.c,$(BUILD)/%.o,$(C_SOURCES)) \
            $(patsubst %.asm,$(BUILD)/%.asm.o,$(ASM_SOURCES))
 
 # ----------------------------------------------------------------------------
+# Programmi utente
+# ----------------------------------------------------------------------------
+# I programmi in user/*.c NON fanno parte del kernel (infatti `user` non è in
+# SRC_DIRS). Ognuno diventa un file a sé, build/user/NOME.bin: un "binario piatto"
+# collegato con user/user.ld per girare all'indirizzo virtuale 0x40000000.
+# Il kernel li incorpora poi come dati (proc/user_programs.asm) e li carica in
+# processi separati.
+USER_SOURCES := $(wildcard user/*.c)
+USER_BINS    := $(patsubst user/%.c,$(BUILD)/user/%.bin,$(USER_SOURCES))
+
+# La libreria comune a tutti i programmi. crt0 va per primo: contiene _start.
+USER_LIB_OBJECTS := $(BUILD)/user/lib/crt0.asm.o $(BUILD)/user/lib/ulib.o
+
+# ----------------------------------------------------------------------------
 # Regole
 # ----------------------------------------------------------------------------
 # .PHONY: questi nomi sono comandi, non file da creare.
@@ -90,6 +104,20 @@ all: $(KERNEL)
 $(KERNEL): $(OBJECTS) linker.ld
 	$(LD) $(LDFLAGS) -o $@ $(OBJECTS)
 	@echo ">>> Kernel pronto: $@"
+
+# Collegamento di un programma utente: il suo .o più la libreria, con lo script
+# user/user.ld. `--oformat binary` produce il binario piatto invece di un file ELF.
+# (I .o si ottengono con le stesse regole di compilazione del kernel, qui sotto.)
+$(BUILD)/user/%.bin: $(BUILD)/user/%.o $(USER_LIB_OBJECTS) user/user.ld
+	$(LD) -m elf_i386 -T user/user.ld --oformat binary -nostdlib -o $@ $(USER_LIB_OBJECTS) $<
+
+# Il file che incorpora i programmi nel kernel va riassemblato ogni volta che uno
+# di essi cambia: lo diciamo a make con una dipendenza esplicita.
+$(BUILD)/proc/user_programs.asm.o: $(USER_BINS)
+
+# make cancellerebbe da solo i file "intermedi" (i .o dei programmi utente) dopo
+# averli usati; questa riga glielo vieta, così non vengono ricompilati ogni volta.
+.SECONDARY:
 
 # Compilazione di un file C. Regola "a modello": % sta per qualsiasi percorso.
 # $< = la prima dipendenza (il .c)     @mkdir -p crea la cartella di destinazione
@@ -135,7 +163,7 @@ test: $(KERNEL)
 		&& ! grep -q "ERRORE" $(BUILD)/serial.log \
 		&& grep -q "Processi: tutte le prove superate" $(BUILD)/serial.log \
 		&& grep -q "Timer: 3 s" $(BUILD)/serial.log \
-		&& echo ">>> TEST OK: avvio, eccezioni, memoria, processi e timer funzionano" \
+		&& echo ">>> TEST OK: avvio, eccezioni, memoria, processi, programmi utente e timer funzionano" \
 		|| (echo ">>> TEST FALLITO: manca un messaggio atteso oppure c'e' un ERRORE" && false)
 
 # Debug con GDB.
@@ -159,4 +187,4 @@ clean:
 # Dipendenze dagli header: gcc (con -MMD) scrive accanto a ogni .o un file .d che
 # dice "questo .o dipende anche da questi .h". Includendoli, make ricompila i .c
 # giusti quando si modifica un header. Il `-` iniziale ignora i file non ancora creati.
--include $(OBJECTS:.o=.d)
+-include $(OBJECTS:.o=.d) $(USER_BINS:.bin=.d) $(USER_LIB_OBJECTS:.o=.d)

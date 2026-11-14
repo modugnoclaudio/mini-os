@@ -29,6 +29,8 @@
 #include "kernel/idt.h"
 #include "proc/process.h"
 #include "proc/scheduler.h"
+#include "mm/paging.h"
+#include "lib/kprintf.h"
 
 /*
  * Ogni syscall è una normale funzione C con al massimo tre argomenti interi.
@@ -43,6 +45,43 @@ static int32_t sys_exit(uint32_t exit_code, uint32_t unused1, uint32_t unused2)
 
     process_exit((int32_t) exit_code);
     return 0;       /* mai raggiunto: process_exit non ritorna */
+}
+
+/* Il massimo che una singola write può stampare. La syscall gira a interrupt
+ * spenti: una stampa enorme bloccherebbe l'intero sistema. */
+#define WRITE_MAX_LENGTH 4096
+
+static int32_t sys_write(uint32_t text_address, uint32_t length, uint32_t unused)
+{
+    (void) unused;
+
+    if (length > WRITE_MAX_LENGTH) {
+        return -1;
+    }
+
+    /*
+     * IL CONTROLLO PIÙ IMPORTANTE DI TUTTO IL FILE. `text_address` è un numero
+     * scelto dal programma. Il kernel può leggere QUALSIASI indirizzo: se si
+     * fidasse, un programma potrebbe passare l'indirizzo di dati del kernel (o
+     * di un indirizzo non mappato, per farlo andare in panic) e farseli stampare.
+     * Verifichiamo quindi che tutta la zona appartenga davvero allo spazio utente
+     * di QUESTO processo. (Vedi user/invasore.c, che ci prova.)
+     */
+    if (!paging_is_user_range(current_process->directory, text_address, length)) {
+        return -1;
+    }
+
+    /*
+     * Ora possiamo usare l'indirizzo del programma direttamente: durante una
+     * syscall è ancora attivo lo spazio di indirizzi del processo che l'ha fatta,
+     * quindi i suoi indirizzi virtuali sono validi anche per il kernel.
+     */
+    const char *text = (const char *) text_address;
+    for (uint32_t i = 0; i < length; i++) {
+        kputchar(text[i]);
+    }
+
+    return (int32_t) length;
 }
 
 static int32_t sys_getpid(uint32_t unused1, uint32_t unused2, uint32_t unused3)
@@ -85,6 +124,7 @@ typedef int32_t (*syscall_function_t)(uint32_t, uint32_t, uint32_t);
 
 static syscall_function_t syscall_table[SYSCALL_COUNT] = {
     [SYS_EXIT]   = sys_exit,
+    [SYS_WRITE]  = sys_write,
     [SYS_GETPID] = sys_getpid,
     [SYS_SLEEP]  = sys_sleep,
     [SYS_YIELD]  = sys_yield,

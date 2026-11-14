@@ -23,6 +23,8 @@
 #include "proc/process.h"
 #include "drivers/timer.h"
 #include "kernel/interrupts.h"
+#include "kernel/gdt.h"
+#include "mm/paging.h"
 
 /* Definita in proc/switch.asm. */
 extern void context_switch(uint32_t *old_esp, uint32_t new_esp);
@@ -89,6 +91,32 @@ void schedule(void)
 
     current_process = next;
     switch_count++;
+
+    /*
+     * Due cose in più rispetto al semplice cambio di stack, necessarie da quando
+     * esistono i processi utente.
+     *
+     * 1) Lo STACK DEL KERNEL da usare al prossimo ingresso nel kernel. Quando un
+     *    interrupt o una syscall interrompe un programma utente, la CPU legge dal
+     *    TSS dove mettere i registri: deve essere la cima dello stack del kernel
+     *    del processo che sta per girare. (Il processo 0 non ha uno stack allocato
+     *    da noi e non va mai in modalità utente: per lui non serve.)
+     */
+    if (next->stack != 0) {
+        gdt_set_kernel_stack((uint32_t) next->stack + KERNEL_STACK_SIZE);
+    }
+
+    /*
+     * 2) Lo SPAZIO DI INDIRIZZI. Se il nuovo processo ha una page directory diversa
+     *    la carichiamo in CR3: da qui in poi gli indirizzi della zona utente portano
+     *    alla SUA memoria. Tra due thread del kernel la directory è la stessa e
+     *    il cambio si salta (e con lui lo svuotamento del TLB).
+     *    Il kernel resta raggiungibile in ogni caso: è mappato uguale in tutte le
+     *    directory, compreso lo stack su cui stiamo lavorando in questo momento.
+     */
+    if (next->directory != previous->directory) {
+        paging_switch_directory(next->directory);
+    }
 
     /*
      * Il MECCANISMO: salva i registri di `previous` e carica quelli di `next`.

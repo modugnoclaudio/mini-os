@@ -16,6 +16,8 @@
 #include "proc/scheduler.h"
 #include "kernel/interrupts.h"
 #include "mm/kheap.h"
+#include "mm/pmm.h"
+#include "proc/programs.h"
 #include "kernel/syscall_numbers.h"
 #include "lib/kprintf.h"
 #include "lib/string.h"
@@ -304,6 +306,136 @@ void proctest_syscalls(void)
     check("una syscall con numero inesistente restituisce -1",
           do_syscall(9999, 0) == -1);
     check("yield ritorna normalmente", do_syscall(SYS_YIELD, 0) == 0);
+}
+
+/* ---------------------------------------------------------------------------
+ * Prova 4: programmi in MODALITÀ UTENTE
+ * ---------------------------------------------------------------------------
+ * I programmi sono i file .c nella cartella user/: compilati a parte, incorporati nel kernel come
+ * dati e caricati ciascuno nel proprio spazio di indirizzi.
+ */
+
+/* Aspetta che un processo termini. Lo si legge attraverso un puntatore `volatile`
+ * perché il campo `state` viene cambiato da un altro flusso di esecuzione.
+ * Il PCB resta valido anche dopo la fine del processo, finché il processo 0
+ * non chiama process_reap_terminated(). */
+static void wait_for_exit(struct process *process)
+{
+    volatile enum process_state *state = &process->state;
+
+    while (*state != PROCESS_TERMINATED) {
+        if (current_process == idle_process) {
+            /* Il processo 0 non può dormire: aspetta il prossimo interrupt. */
+            __asm__ volatile ("hlt");
+        } else {
+            /* Un processo normale si mette in attesa e ricontrolla al tick dopo. */
+            process_sleep(1);
+        }
+    }
+}
+
+/*
+ * Il "supervisore" della prova con il programma che non cede mai la CPU.
+ *
+ * Perché un thread a parte e non il processo 0, come per le altre prove? Perché il
+ * processo 0 è l'idle: lo scheduler lo sceglie SOLO quando nessun altro è pronto.
+ * Finché 'ciclo' gira (cioè sempre) il processo 0 non riceve mai la CPU, e non
+ * potrebbe né accorgersi che 'hello' ha finito né eliminare 'ciclo'.
+ * Un thread normale invece partecipa al giro del round-robin come tutti.
+ */
+static void supervisor_thread(void)
+{
+    struct process *spinner = program_run("ciclo");
+    struct process *polite = program_run("hello");
+    check("'ciclo' (che non termina mai) e un secondo 'hello' avviati",
+          spinner != 0 && polite != 0);
+
+    if (spinner != 0 && polite != 0) {
+        /* 'hello' può girare e finire solo se il timer toglie la CPU a 'ciclo'. */
+        wait_for_exit(polite);
+        check("'hello' ha finito anche se 'ciclo' non cede mai la CPU (prelazione)",
+              polite->exit_code == 0);
+
+        /* Dormiamo 20 tick: in quel tempo l'unico processo pronto è 'ciclo'. */
+        uint32_t ticks_before = spinner->cpu_ticks;
+        process_sleep(20);
+        check("mentre gli altri dormono, 'ciclo' consuma tutta la CPU",
+              spinner->cpu_ticks >= ticks_before + 15);
+
+        /* Non finirà mai da solo: lo eliminiamo d'autorità. */
+        process_kill(spinner);
+        check("'ciclo' e' stato terminato dal kernel",
+              spinner->state == PROCESS_TERMINATED);
+    }
+    /* Ritornando, questo thread termina. */
+}
+
+void proctest_user_programs(void)
+{
+    kprintf("Prova dei programmi in modalita' utente:\n");
+
+    uint32_t free_pages_before = pmm_get_free_pages();
+    uint32_t heap_used_before = kheap_get_used_bytes();
+
+    /* --- Un programma semplice: parte, stampa con una syscall, termina --- */
+    struct process *hello = program_run("hello");
+    check("il programma 'hello' viene caricato", hello != 0 && hello->is_user);
+    if (hello != 0) {
+        wait_for_exit(hello);
+        check("'hello' e' terminato da solo con codice 0",
+              hello->exit_code == 0 && hello->killed_by == NOT_KILLED);
+    }
+
+    process_reap_terminated();
+    check("terminato il programma, tutta la sua memoria e' tornata libera",
+          pmm_get_free_pages() == free_pages_before &&
+          kheap_get_used_bytes() == heap_used_before);
+
+    check("un programma inesistente non parte", program_run("non-esiste") == 0);
+
+    /* --- Due copie dello stesso programma: memoria separata --- */
+    struct process *first = program_run("conta");
+    struct process *second = program_run("conta");
+    check("due copie di 'conta' in esecuzione insieme", first != 0 && second != 0);
+    if (first != 0 && second != 0) {
+        wait_for_exit(first);
+        wait_for_exit(second);
+
+        /* Ogni copia somma 3 volte il proprio PID in una variabile globale che,
+         * nelle due copie, sta allo stesso indirizzo virtuale. */
+        check("ogni copia ha contato per conto suo (memoria separata)",
+              first->exit_code == (int32_t) (3 * first->pid) &&
+              second->exit_code == (int32_t) (3 * second->pid));
+    }
+    process_reap_terminated();
+
+    /* --- Programmi che violano le regole: devono morire loro, non il kernel --- */
+    struct process *intruder = program_run("invasore");
+    if (intruder != 0) {
+        wait_for_exit(intruder);
+        check("chi scrive nella memoria del kernel viene terminato (page fault)",
+              intruder->killed_by == INT_PAGE_FAULT);
+    }
+
+    struct process *privileged = program_run("privilegiato");
+    if (privileged != 0) {
+        wait_for_exit(privileged);
+        check("chi esegue un'istruzione privilegiata viene terminato (eccezione 13)",
+              privileged->killed_by == 13);
+    }
+
+    /* --- Un programma che non cede mai la CPU: prelazione in modalità utente --- */
+    struct process *supervisor = process_create("supervisore", supervisor_thread);
+    check("avvio del thread supervisore", supervisor != 0);
+    if (supervisor != 0) {
+        wait_for_exit(supervisor);
+    }
+
+    process_reap_terminated();
+    check("dopo tutto questo resta solo il processo 0, e il kernel e' vivo",
+          process_count() == 1);
+    check("nessuna pagina di memoria e' andata persa",
+          pmm_get_free_pages() == free_pages_before);
 }
 
 void proctest_summary(void)
