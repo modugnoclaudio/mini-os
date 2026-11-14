@@ -20,24 +20,27 @@ Dopo quella data si continua con Opus 5.5.
 | 2 | GDT, IDT, eccezioni, PIC, timer, tastiera | gio 12 | ✅ fatta |
 | 3 | Memoria: allocatore fisico (bitmap), paginazione, heap `kmalloc` | ven 13 | ✅ fatta |
 | 4 | Processi: PCB, context switch, scheduler round-robin | sab 14 | ✅ fatta |
-| 5 | Syscall (`int 0x80`) e programmi in user mode | dom 15 | ⬜ da fare |
+| 5 | Syscall (`int 0x80`) e programmi in user mode | dom 15 | ✅ fatta |
 | 6 | Filesystem in RAM e shell (`ls`, `cat`, `ps`, `run`) | lun 16 | ⬜ da fare |
 | 7 | Demo nel browser con v86, README, rifiniture | mar 17+ (anche con Opus) | ⬜ da fare |
 
 Legenda: ⬜ da fare · 🟨 in corso · ✅ fatta · ⚠️ fatta con problemi noti
 
 ## Prossimo passo
-Fase 5: syscall (`int 0x80`) e programmi in user mode.
-Primo passo concreto: aggiungere alla GDT i segmenti utente (ring 3) e il TSS, che dice
-alla CPU quale stack del kernel usare quando arriva un interrupt mentre gira codice utente;
-poi saltare in modalità utente con `iret` ed eseguire una prima syscall di stampa.
-Solo dopo: uno spazio di indirizzi (page directory) per ogni processo.
+Fase 6: filesystem in RAM e shell (`ls`, `cat`, `ps`, `run`).
+Primo passo concreto: un buffer circolare per i tasti in `drivers/keyboard.c` e una
+funzione bloccante per leggere una riga (oggi il gestore fa solo l'eco). Poi il
+filesystem in RAM in `fs/` (elenco di file con nome, dati e dimensione), in cui far
+confluire i programmi oggi incorporati con `proc/programs.c`. Infine la shell.
 
-Da ricordare per la fase 5:
-- ogni processo avrà la sua page directory, e le mappature del kernel (identità e heap)
-  dovranno comparire uguali in tutte; lo scheduler dovrà cambiare `CR3` e lo stack nel TSS;
-- `struct registers` ha già i campi `user_esp` / `user_ss`, e la IDT va estesa con il
-  gate `0x80` accessibile da ring 3.
+Da ricordare per la fase 6:
+- la shell NON può girare nel processo 0: è l'idle e riceve la CPU solo quando nessun
+  altro è pronto (vedi "Errori incontrati" in `docs/notes/fase5-modo-utente.md`).
+  Deve essere un processo normale;
+- per `run` serve un modo di attendere la fine di un processo (oggi i test fanno polling
+  sullo stato) e per `ps` esiste già `process_print_list`;
+- se la shell sarà un programma utente serviranno nuove syscall (leggere una riga,
+  elencare e leggere file, avviare un programma, attendere).
 
 ## Struttura del repository
 ```
@@ -97,6 +100,16 @@ docs/
 | 14/11 | Mutua esclusione spegnendo gli interrupt (`interrupts_save_and_disable` / `interrupts_restore`) | Su una sola CPU basta, e si annida correttamente; niente lock o semafori per ora |
 | 14/11 | `kprintf`, `kmalloc`/`kfree`, `pmm_alloc_page`/`pmm_free_page` sono sezioni critiche | Usate da più processi: senza protezione righe mescolate e strutture rovinate |
 | 14/11 | `process_sleep` realizzata controllando tutta la lista a ogni tick | Poche righe; una coda ordinata servirebbe solo con molti processi |
+| 14/11 | GDT a 6 righe: aggiunti codice utente `0x1B`, dati utente `0x23`, TSS `0x28`; del TSS si usano solo `ss0`/`esp0` | Minimo richiesto dalla CPU per passare da ring 3 a ring 0; il cambio di contesto resta software |
+| 14/11 | Syscall con `int 0x80`: numero in `EAX`, argomenti in `EBX`/`ECX`/`EDX`, risultato in `EAX`, `-1` = errore; numeri in `kernel/syscall_numbers.h` | Stessa convenzione di Linux a 32 bit; un solo header condiviso tra kernel e programmi |
+| 14/11 | Le syscall girano a interrupt spenti (interrupt gate); `write` limitata a 4096 byte | Nessuna concorrenza dentro il kernel; il limite evita di bloccare il sistema a lungo |
+| 14/11 | Ogni processo utente ha la sua page directory; le righe del kernel sono copiate e puntano alle stesse page table | Kernel mappato ovunque agli stessi indirizzi: syscall e interrupt non cambiano `CR3` |
+| 14/11 | Page table dell'heap del kernel create in anticipo (`paging_reserve_kernel_tables`) | Le directory dei processi copiano le righe: una tabella creata dopo non sarebbe visibile in quelle esistenti |
+| 14/11 | Layout utente: programma a `0x40000000` (64 KiB), stack sotto `0xB0000000` (16 KiB); zona utente `0x40000000`–`0xC0000000` | Dimensioni fisse: loader banale, nessun formato da interpretare |
+| 14/11 | Programmi utente come binari piatti (`user/user.ld`), incorporati nel kernel con `incbin` (`proc/user_programs.asm`) | Non c'è ancora un disco né un filesystem; niente loader ELF da scrivere |
+| 14/11 | Puntatori ricevuti dalle syscall sempre validati (`paging_is_user_range`) | Il kernel può leggere tutto: senza controllo un programma gli farebbe leggere o stampare memoria non sua |
+| 14/11 | Eccezione provocata in ring 3 = terminazione del solo processo (`process_kill_current`); in ring 0 = panic | L'errore di un programma non deve fermare il sistema |
+| 14/11 | `process_kill` per terminare un altro processo dall'esterno | Serve per i programmi che non terminano; è sicuro finché il kernel non ha lock |
 
 ## Problemi noti
 _(nessun bug aperto)_
@@ -109,6 +122,12 @@ _(nessun bug aperto)_
 - 14/11 — ✅ risolto in fase 4 (`kprintf` è ora una sezione critica). Voce originale: 11/11 — `kprintf` non è protetta dagli interrupt: l'eco di un tasto può finire in mezzo a una riga stampata dal ciclo principale. Innocuo per ora; da sistemare quando ci saranno più processi (fase 4).
 - 11/11 — Tastiera: layout solo US (simboli e accentate non corrispondono a una tastiera italiana); frecce e altri tasti estesi ignorati; niente Caps Lock né Ctrl/Alt.
 - 11/11 — PIC: gli interrupt "spuri" (IRQ 7 e 15) non sono trattati in modo speciale. In QEMU non si presentano.
+- 14/11 — Anche la fase 5 è stata provata solo nel container (60 avvii consecutivi senza errori, più 16 e 512 MiB di RAM), non su WSL2.
+- 14/11 — Il processo 0 (idle) riceve la CPU solo se nessun altro è pronto: un processo che gira all'infinito gli impedisce di lavorare, compresa la pulizia dei processi terminati. Qualsiasi compito attivo (shell, supervisione) va affidato a un processo normale.
+- 14/11 — Programmi utente: tutte le pagine sono scrivibili (anche il codice); dimensioni fisse (64 KiB + 16 KiB di stack, senza pagina di guardia); nessun argomento a `main`; niente `fork`/`exec`/`wait`; per aggiungerne uno vanno toccati tre file.
+- 14/11 — Le syscall non sono interrompibili: una syscall lenta ritarderebbe timer e tastiera. Oggi nessuna lo è.
+- 14/11 — `process_kill` presuppone un kernel senza lock: se in futuro si aggiungono semafori o lock, uccidere un processo che ne tiene uno lo lascerebbe bloccato per sempre.
+- 14/11 — I controlli "nessuna pagina persa" nei test presuppongono che l'heap non cresca durante la prova (le pagine dell'heap non tornano mai al PMM).
 - 14/11 — Anche la fase 4 è stata provata solo nel container (60 avvii consecutivi senza errori, più 16 e 512 MiB di RAM), non su WSL2.
 - 14/11 — Stack dei processi: 8 KiB senza pagina di guardia. Uno stack overflow sovrascrive in silenzio il blocco di heap vicino.
 - 14/11 — Le sezioni critiche spengono gli interrupt per tutta la durata di una `kprintf`: su hardware reale con seriale lenta si potrebbero perdere tick del timer. In QEMU non succede.
@@ -130,3 +149,4 @@ _(nessun bug aperto)_
 | 11/11 | Fable 5.2 | Corretto `make test` che si bloccava su WSL2. Fase 2 completa in quattro passi: GDT, IDT ed eccezioni, PIC e timer, tastiera. `make test` passa. Scritta `docs/notes/fase2-interrupt.md` |
 | 14/11 | Fable 5.2 | Fase 3 completa in tre passi: mappa Multiboot e allocatore fisico a bitmap, paginazione con RAM in identità e gestore dei page fault, heap con `kmalloc`/`kfree`. Prove automatiche in `mm/memtest.c`. `make test` passa. Scritta `docs/notes/fase3-memoria.md` |
 | 14/11 | Fable 5.2 | Fase 4 completa in tre passi: sezioni critiche, PCB e context switch con processi cooperativi, scheduler round-robin con prelazione e `sleep`. Trovata e corretta una race condition nei test. `make test` passa. Scritta `docs/notes/fase4-processi.md` |
+| 14/11 | Fable 5.2 | Fase 5 completa in tre passi: segmenti utente, TSS e syscall `int 0x80`; una page directory per processo; programmi utente (`user/`) compilati a parte, caricati dal kernel ed eseguiti in ring 3, con protezione verificata. Trovata la starvation del processo 0 nei test. `make test` passa. Scritta `docs/notes/fase5-modo-utente.md` |

@@ -203,6 +203,7 @@ Processi: tutte le prove superate
 Cosa osservare: `calcolo-A` e `calcolo-B` non cedono mai la CPU, eppure avanzano
 insieme (`ABsABs`, non `AAABBB`): è la prelazione. Il dormiglione ha 0 tick di CPU.
 I numeri esatti di tick possono variare di poco.
+(Dalla fase 5 l'output prosegue con le prove dei programmi utente e il messaggio finale è diverso: vedi `docs/notes/fase5-modo-utente.md`.)
 
 Con `make run` la tastiera continua a funzionare anche durante le prove.
 
