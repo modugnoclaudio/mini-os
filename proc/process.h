@@ -111,6 +111,16 @@ struct process {
     int32_t killed_by;                  /* numero dell'eccezione che lo ha fatto terminare,
                                            oppure NOT_KILLED                            */
 
+    /*
+     * Parentela tra processi. Si usano i PID e non i puntatori ai PCB: un PCB può
+     * essere liberato, e un puntatore rimasto in giro indicherebbe memoria non più
+     * valida; un PID al massimo "non si trova più" (process_find restituisce 0).
+     */
+    uint32_t parent_pid;                /* chi ha avviato questo processo con la syscall
+                                           spawn (0 = nessuno: lo ha creato il kernel)  */
+    uint32_t waiting_for_pid;           /* se è bloccato nella syscall wait: il PID del
+                                           figlio di cui aspetta la fine (0 = nessuno)  */
+
     struct process *next;               /* prossimo PCB: la lista è CIRCOLARE           */
 };
 
@@ -148,6 +158,16 @@ void process_kill_current(struct registers *regs);
 /* Cerca un processo dato il suo PID. Restituisce 0 se non esiste (più).
  * Va chiamata a interrupt disabilitati: la lista non deve cambiare durante la ricerca. */
 struct process *process_find(uint32_t pid);
+
+/* Cerca un processo dato il suo nome (il primo che trova). Stesse regole di process_find. */
+struct process *process_find_by_name(const char *name);
+
+/*
+ * Reazione a Ctrl+C: termina il programma "in primo piano", cioè quello di cui un
+ * altro processo (di solito la shell) sta aspettando la fine. Se non c'è nessun
+ * programma in primo piano non fa nulla. La chiama il driver della tastiera.
+ */
+void process_interrupt_foreground(void);
 
 /* Termina un ALTRO processo (non quello corrente, non il processo 0), che in quel
  * momento è per forza fermo. La sua memoria verrà liberata da process_reap_terminated. */

@@ -55,6 +55,13 @@ static inline uint8_t inb(uint16_t port)
     return value;
 }
 
+/* Come outb, ma scrive un valore a 16 bit ("w" = word). Il registro usato è AX
+ * (i 16 bit bassi di EAX) invece di AL. */
+static inline void outw(uint16_t port, uint16_t value)
+{
+    __asm__ volatile ("outw %%ax, %%dx" : : "a"(value), "d"(port));
+}
+
 /*
  * Piccola pausa (circa un microsecondo). Alcuni chip vecchi, come il PIC, hanno bisogno
  * di un attimo tra un comando e il successivo. Scrivere sulla porta 0x80 è il trucco

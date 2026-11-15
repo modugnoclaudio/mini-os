@@ -59,6 +59,8 @@ void process_init(void)
     idle->wake_tick = 0;
     idle->exit_code = 0;
     idle->killed_by = NOT_KILLED;
+    idle->parent_pid = 0;
+    idle->waiting_for_pid = 0;
     idle->next = idle;                  /* lista circolare con un solo elemento: punta a sé */
 
     idle_process = idle;
@@ -126,6 +128,8 @@ static struct process *allocate_process(const char *name)
     process->wake_tick = 0;
     process->exit_code = 0;
     process->killed_by = NOT_KILLED;
+    process->parent_pid = 0;
+    process->waiting_for_pid = 0;
 
     /*
      * IL TRUCCO DELLO STACK INIZIALE.
@@ -295,6 +299,17 @@ struct process *process_create_user(const char *name, const uint8_t *image, uint
     return process;
 }
 
+/*
+ * Se il processo ha un genitore che ne sta aspettando la fine (syscall wait),
+ * lo risveglia. È l'evento che il genitore attendeva da bloccato.
+ */
+static void wake_parent(struct process *process)
+{
+    if (process->parent_pid != 0) {
+        process_wake(process_find(process->parent_pid));
+    }
+}
+
 void process_exit(int32_t exit_code)
 {
     /* Il processo 0 non può terminare: serve sempre qualcuno che possa girare. */
@@ -314,6 +329,7 @@ void process_exit(int32_t exit_code)
      */
     current_process->exit_code = exit_code;
     current_process->state = PROCESS_TERMINATED;
+    wake_parent(current_process);
     schedule();
 
     /* Qui non si arriva mai: lo scheduler non sceglie un processo terminato. */
@@ -353,6 +369,19 @@ struct process *process_find(uint32_t pid)
     return 0;
 }
 
+struct process *process_find_by_name(const char *name)
+{
+    struct process *process = idle_process;
+    do {
+        if (string_equals(process->name, name)) {
+            return process;
+        }
+        process = process->next;
+    } while (process != idle_process);
+
+    return 0;
+}
+
 void process_kill(struct process *process)
 {
     uint32_t flags = interrupts_save_and_disable();
@@ -369,9 +398,84 @@ void process_kill(struct process *process)
         && process->state != PROCESS_TERMINATED) {
         process->exit_code = -1;
         process->state = PROCESS_TERMINATED;
+        wake_parent(process);
     }
 
     interrupts_restore(flags);
+}
+
+void process_interrupt_foreground(void)
+{
+    uint32_t flags = interrupts_save_and_disable();
+
+    /*
+     * Chi è "in primo piano"? Cerchiamo un processo bloccato in attesa di un figlio
+     * (la shell dopo `run`): il figlio è il programma che l'utente sta guardando.
+     * Se anche il figlio sta aspettando un proprio figlio (una shell lanciata da
+     * un'altra shell), si scende lungo la catena fino all'ultimo.
+     */
+    struct process *target = 0;
+
+    struct process *process = idle_process;
+    do {
+        if (process->state == PROCESS_BLOCKED && process->waiting_for_pid != 0) {
+            target = process_find(process->waiting_for_pid);
+            break;
+        }
+        process = process->next;
+    } while (process != idle_process);
+
+    while (target != 0 && target->state == PROCESS_BLOCKED && target->waiting_for_pid != 0) {
+        target = process_find(target->waiting_for_pid);
+    }
+
+    if (target == 0 || target == idle_process || target->state == PROCESS_TERMINATED) {
+        interrupts_restore(flags);
+        return;         /* nessun programma in primo piano: Ctrl+C non fa nulla */
+    }
+
+    kprintf("^C\n");
+
+    if (target == current_process) {
+        /*
+         * Il programma da fermare è proprio quello che stava girando quando è
+         * arrivato l'interrupt della tastiera: siamo sul SUO stack del kernel.
+         * Lo facciamo terminare "dall'interno", come se avesse chiamato exit.
+         * process_exit non ritorna: il resto del gestore dell'interrupt viene
+         * abbandonato insieme al processo.
+         */
+        process_exit(-1);
+    }
+
+    process_kill(target);
+    interrupts_restore(flags);
+}
+
+/*
+ * Si può liberare la memoria di questo processo?
+ *
+ * COLLEGAMENTO CON LA TEORIA: è la regola dei processi ZOMBIE di Unix. Un processo
+ * terminato non sparisce subito: il suo PCB deve restare finché il genitore non ne
+ * ha letto il codice di uscita con wait(). Se lo liberassimo prima, il genitore
+ * non potrebbe più sapere com'è finito.
+ */
+static int can_be_reaped(struct process *process)
+{
+    /* Non si libera mai il processo corrente: sta usando il proprio stack. */
+    if (process->state != PROCESS_TERMINATED || process == current_process) {
+        return 0;
+    }
+
+    /* Nessun genitore (creato dal kernel), oppure il genitore ha già fatto wait
+     * (che azzera parent_pid): nessuno aspetta più il codice di uscita. */
+    if (process->parent_pid == 0) {
+        return 1;
+    }
+
+    /* Il genitore non esiste più o è terminato a sua volta: il figlio è "orfano" e
+     * nessuno farà mai wait su di lui. */
+    struct process *parent = process_find(process->parent_pid);
+    return parent == 0 || parent->state == PROCESS_TERMINATED;
 }
 
 void process_reap_terminated(void)
@@ -384,8 +488,7 @@ void process_reap_terminated(void)
     struct process *process = idle_process->next;
 
     while (process != idle_process) {
-        /* Non si libera mai il processo corrente: sta usando il proprio stack. */
-        if (process->state == PROCESS_TERMINATED && process != current_process) {
+        if (can_be_reaped(process)) {
             previous->next = process->next;     /* sgancia dalla lista */
 
             /* Un processo utente possiede anche uno spazio di indirizzi: la sua

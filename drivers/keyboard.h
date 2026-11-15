@@ -26,4 +26,7 @@ int keyboard_buffer_is_empty(void);
  */
 void keyboard_inject_char(char c);
 
+/* Come sopra, per la combinazione Ctrl+C. */
+void keyboard_inject_ctrl_c(void);
+
 #endif /* DRIVERS_KEYBOARD_H */

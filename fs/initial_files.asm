@@ -60,6 +60,7 @@ FILE_INIZIALE "benvenuto.txt", "fs/root/benvenuto.txt"
 FILE_INIZIALE "leggimi.txt",   "fs/root/leggimi.txt"
 
 ; Programmi utente: compilati da user/ (file .c) in build/user/.
+FILE_INIZIALE "shell",         "build/user/shell.bin"
 FILE_INIZIALE "hello",         "build/user/hello.bin"
 FILE_INIZIALE "conta",         "build/user/conta.bin"
 FILE_INIZIALE "invasore",      "build/user/invasore.bin"

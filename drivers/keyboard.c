@@ -38,6 +38,7 @@
 /* Scancode che ci interessano in modo particolare. */
 #define SCANCODE_LEFT_SHIFT   0x2A
 #define SCANCODE_RIGHT_SHIFT  0x36
+#define SCANCODE_CTRL         0x1D
 #define SCANCODE_EXTENDED     0xE0      /* prefisso dei tasti "estesi" (frecce, Canc...) */
 #define SCANCODE_RELEASE_BIT  0x80      /* bit 7: acceso = tasto rilasciato              */
 
@@ -69,6 +70,7 @@ static const char scancode_shift[128] = {
 /* Stato che deve sopravvivere tra un interrupt e l'altro: per questo sono variabili
  * globali (`static` = private di questo file) e non locali del gestore. */
 static int shift_pressed = 0;       /* 1 mentre uno dei due Shift è tenuto premuto      */
+static int ctrl_pressed = 0;        /* 1 mentre Ctrl è tenuto premuto                   */
 static int extended_pending = 0;    /* 1 se l'ultimo byte ricevuto era il prefisso 0xE0 */
 
 /* ---------------------------------------------------------------------------
@@ -155,12 +157,30 @@ static void keyboard_handler(struct registers *regs)
         return;
     }
 
+    /* Ctrl: stesso discorso. */
+    if (key == SCANCODE_CTRL) {
+        ctrl_pressed = !released;
+        return;
+    }
+
     /* Per tutti gli altri tasti conta solo la pressione. */
     if (released) {
         return;
     }
 
     char c = shift_pressed ? scancode_shift[key] : scancode_normal[key];
+
+    /*
+     * Ctrl+C non è un carattere da consegnare a chi legge: è un ORDINE per il
+     * kernel, "ferma il programma in esecuzione". Viene gestito qui, subito,
+     * proprio perché il programma da fermare potrebbe non leggere mai la tastiera
+     * (pensa a un ciclo infinito).
+     * COLLEGAMENTO CON LA TEORIA: sui sistemi Unix è il segnale SIGINT.
+     */
+    if (ctrl_pressed && (c == 'c' || c == 'C')) {
+        process_interrupt_foreground();
+        return;
+    }
 
     /* Il gestore non stampa più nulla: deposita il carattere e torna subito.
      * A mostrarlo a schermo ("eco") penserà il programma che lo legge. */
@@ -210,6 +230,13 @@ char keyboard_read_char(void)
 int keyboard_buffer_is_empty(void)
 {
     return count == 0;
+}
+
+void keyboard_inject_ctrl_c(void)
+{
+    uint32_t flags = interrupts_save_and_disable();
+    process_interrupt_foreground();
+    interrupts_restore(flags);
 }
 
 void keyboard_inject_char(char c)
