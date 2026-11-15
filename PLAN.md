@@ -21,26 +21,24 @@ Dopo quella data si continua con Opus 5.5.
 | 3 | Memoria: allocatore fisico (bitmap), paginazione, heap `kmalloc` | ven 13 | ✅ fatta |
 | 4 | Processi: PCB, context switch, scheduler round-robin | sab 14 | ✅ fatta |
 | 5 | Syscall (`int 0x80`) e programmi in user mode | dom 15 | ✅ fatta |
-| 6 | Filesystem in RAM e shell (`ls`, `cat`, `ps`, `run`) | lun 16 | ⬜ da fare |
+| 6 | Filesystem in RAM e shell (`ls`, `cat`, `ps`, `run`) | lun 16 | ✅ fatta |
 | 7 | Demo nel browser con v86, README, rifiniture | mar 17+ (anche con Opus) | ⬜ da fare |
 
 Legenda: ⬜ da fare · 🟨 in corso · ✅ fatta · ⚠️ fatta con problemi noti
 
 ## Prossimo passo
-Fase 6: filesystem in RAM e shell (`ls`, `cat`, `ps`, `run`).
-Primo passo concreto: un buffer circolare per i tasti in `drivers/keyboard.c` e una
-funzione bloccante per leggere una riga (oggi il gestore fa solo l'eco). Poi il
-filesystem in RAM in `fs/` (elenco di file con nome, dati e dimensione), in cui far
-confluire i programmi oggi incorporati con `proc/programs.c`. Infine la shell.
+Fase 7: demo nel browser con v86, README, rifiniture.
+Primo passo concreto: scrivere il `README.md` (oggi contiene solo il titolo) con
+descrizione, requisiti, comandi `make` e una sessione di esempio della shell.
+Poi la demo nel browser: verificare se v86 sa avviare direttamente un kernel Multiboot
+(`build/kernel.elf`); se no, creare un'immagine ISO avviabile con GRUB
+(`grub-mkrescue`) e aggiungere un target `make iso`.
 
-Da ricordare per la fase 6:
-- la shell NON può girare nel processo 0: è l'idle e riceve la CPU solo quando nessun
-  altro è pronto (vedi "Errori incontrati" in `docs/notes/fase5-modo-utente.md`).
-  Deve essere un processo normale;
-- per `run` serve un modo di attendere la fine di un processo (oggi i test fanno polling
-  sullo stato) e per `ps` esiste già `process_print_list`;
-- se la shell sarà un programma utente serviranno nuove syscall (leggere una riga,
-  elencare e leggere file, avviare un programma, attendere).
+Da ricordare per la fase 7:
+- lo spegnimento automatico di `make test` (porta `0x604`) funziona solo in QEMU;
+- con un bootloader diverso da QEMU vanno riverificate la riga di comando Multiboot
+  (`autotest`) e la posizione della struttura Multiboot (vedi "Problemi noti");
+- il layout di tastiera è solo americano: per una demo pubblica vale la pena dirlo.
 
 ## Struttura del repository
 ```
@@ -110,6 +108,19 @@ docs/
 | 14/11 | Puntatori ricevuti dalle syscall sempre validati (`paging_is_user_range`) | Il kernel può leggere tutto: senza controllo un programma gli farebbe leggere o stampare memoria non sua |
 | 14/11 | Eccezione provocata in ring 3 = terminazione del solo processo (`process_kill_current`); in ring 0 = panic | L'errore di un programma non deve fermare il sistema |
 | 14/11 | `process_kill` per terminare un altro processo dall'esterno | Serve per i programmi che non terminano; è sicuro finché il kernel non ha lock |
+| 15/11 | La shell è un programma utente (`user/shell.c`), avviata dal kernel come primo processo e riavviata se termina | Dimostra che le syscall bastano a costruire un'interfaccia; il processo 0 non può farlo perché è l'idle |
+| 15/11 | Nuovo stato `PROCESS_BLOCKED` con `process_block` / `process_wake` | Attesa passiva di un evento (tasto, fine di un figlio) invece di polling |
+| 15/11 | Tastiera: buffer circolare di 128 caratteri, `read_key` bloccante, un solo lettore; eco e Backspace nella libreria utente | Schema produttore-consumatore; il driver deposita e basta |
+| 15/11 | Riferimenti tra processi tramite PID (`parent_pid`, `waiting_for_pid`, lettore della tastiera), mai tramite puntatori al PCB | Un PCB può essere liberato; un PID al massimo non si trova più |
+| 15/11 | `spawn(nome)` + `wait(pid)` invece di `fork`/`exec`; un processo terminato resta zombie finché il genitore non fa `wait` | Niente copia dello spazio di indirizzi; il codice di uscita deve sopravvivere al processo |
+| 15/11 | Ctrl+C gestito nel driver della tastiera: termina il programma di cui qualcuno attende la fine | Deve funzionare anche con programmi che non leggono la tastiera |
+| 15/11 | Filesystem in RAM piatto: tabella fissa di 32 file, 64 KiB l'uno, contenuto in un blocco dell'heap; scrittura solo dell'intero file | Senza disco non servono blocchi né indici; la versione più semplice che supporti creare e cancellare |
+| 15/11 | Syscall sui file per nome, senza descrittori (`file_read` con offset) | Evita la tabella dei file aperti per processo e la sua pulizia |
+| 15/11 | Contenuto iniziale del filesystem incorporato con `fs/initial_files.asm` (una riga per file); sostituisce `proc/user_programs.asm` e la tabella in `proc/programs.c` | Aggiungere un file o un programma ora richiede una sola riga |
+| 15/11 | Programmi riconosciuti dal numero magico `MOS1` nei primi 4 byte; l'esecuzione parte a `0x40000004` | Impedisce di "eseguire" un file di testo |
+| 15/11 | Syscall con quattro argomenti (aggiunto `ESI`); 13 syscall in tutto | `file_read` ha bisogno di nome, buffer, quantità e posizione |
+| 15/11 | Prove automatiche solo se la riga di comando Multiboot contiene `autotest` (`make test`); `make run` va dritto alla shell | Avvio normale pulito; stessa immagine del kernel per uso e collaudo |
+| 15/11 | In collaudo un thread del kernel "digita" nella shell (`kernel/autotest.c`) e poi spegne QEMU (porta `0x604`) | Prova ripetibile di tutta la catena tastiera → shell → syscall; `make test` dura 2 secondi invece di 8 |
 
 ## Problemi noti
 _(nessun bug aperto)_
@@ -122,6 +133,14 @@ _(nessun bug aperto)_
 - 14/11 — ✅ risolto in fase 4 (`kprintf` è ora una sezione critica). Voce originale: 11/11 — `kprintf` non è protetta dagli interrupt: l'eco di un tasto può finire in mezzo a una riga stampata dal ciclo principale. Innocuo per ora; da sistemare quando ci saranno più processi (fase 4).
 - 11/11 — Tastiera: layout solo US (simboli e accentate non corrispondono a una tastiera italiana); frecce e altri tasti estesi ignorati; niente Caps Lock né Ctrl/Alt.
 - 11/11 — PIC: gli interrupt "spuri" (IRQ 7 e 15) non sono trattati in modo speciale. In QEMU non si presentano.
+- 15/11 — Le fasi 5 e 6 sono state provate solo nel container (40 esecuzioni consecutive di `make test` senza errori, 16 e 512 MiB di RAM, tasti veri inviati dal monitor di QEMU), non su WSL2.
+- 15/11 — Filesystem: nessuna persistenza (tutto si perde allo spegnimento), nessuna sottocartella, nessun permesso; un file si può solo riscrivere per intero; il puntatore restituito da `fs_find` vale solo finché il file non viene sostituito o cancellato.
+- 15/11 — Shell: nessun argomento passato ai programmi, niente pipe, redirezione, esecuzione in background, cronologia o tasti freccia. Layout di tastiera solo americano.
+- 15/11 — `wait` restituisce -1 sia per un errore sia per un programma terminato dal kernel o da Ctrl+C: la shell non distingue i casi.
+- 15/11 — Un processo terminato resta visibile in `ps` come "terminato" finché il processo 0 non trova un momento libero per fare pulizia. Con un programma che non cede mai la CPU (`run ciclo`) pulizia e riavvio della shell restano fermi fino a Ctrl+C.
+- 15/11 — Tastiera: un solo processo alla volta può essere in attesa di un tasto; se due processi leggono insieme, il primo resta bloccato.
+- 15/11 — Lo spegnimento a fine collaudo funziona solo in QEMU. Su un altro emulatore `make test` terminerebbe per timeout (30 secondi).
+- 15/11 — ✅ risolto in fase 6: per aggiungere un programma ora basta una riga in `fs/initial_files.asm`; e il processo 0 non stampa più le righe "Timer: N s".
 - 14/11 — Anche la fase 5 è stata provata solo nel container (60 avvii consecutivi senza errori, più 16 e 512 MiB di RAM), non su WSL2.
 - 14/11 — Il processo 0 (idle) riceve la CPU solo se nessun altro è pronto: un processo che gira all'infinito gli impedisce di lavorare, compresa la pulizia dei processi terminati. Qualsiasi compito attivo (shell, supervisione) va affidato a un processo normale.
 - 14/11 — Programmi utente: tutte le pagine sono scrivibili (anche il codice); dimensioni fisse (64 KiB + 16 KiB di stack, senza pagina di guardia); nessun argomento a `main`; niente `fork`/`exec`/`wait`; per aggiungerne uno vanno toccati tre file.
@@ -150,3 +169,4 @@ _(nessun bug aperto)_
 | 14/11 | Fable 5.2 | Fase 3 completa in tre passi: mappa Multiboot e allocatore fisico a bitmap, paginazione con RAM in identità e gestore dei page fault, heap con `kmalloc`/`kfree`. Prove automatiche in `mm/memtest.c`. `make test` passa. Scritta `docs/notes/fase3-memoria.md` |
 | 14/11 | Fable 5.2 | Fase 4 completa in tre passi: sezioni critiche, PCB e context switch con processi cooperativi, scheduler round-robin con prelazione e `sleep`. Trovata e corretta una race condition nei test. `make test` passa. Scritta `docs/notes/fase4-processi.md` |
 | 14/11 | Fable 5.2 | Fase 5 completa in tre passi: segmenti utente, TSS e syscall `int 0x80`; una page directory per processo; programmi utente (`user/`) compilati a parte, caricati dal kernel ed eseguiti in ring 3, con protezione verificata. Trovata la starvation del processo 0 nei test. `make test` passa. Scritta `docs/notes/fase5-modo-utente.md` |
+| 15/11 | Fable 5.2 | Fase 6 completa in tre passi: tastiera con buffer e lettura bloccante; filesystem in RAM con i programmi come file; shell in modalità utente con 8 nuove syscall, Ctrl+C e collaudo automatico. `make test` passa. Scritta `docs/notes/fase6-fs-shell.md` |

@@ -200,6 +200,9 @@ Cosa osservare: le due copie di `conta` stampano lo **stesso indirizzo** ma valo
 diversi; i `PAGE FAULT` e i `terminato dal kernel` qui sono **previsti**, non errori
 (la parola da non vedere mai è `ERRORE`).
 
+(Dalla fase 6 queste prove girano solo con `make test`; `make run` porta direttamente
+alla shell, e i programmi si aggiungono in `fs/initial_files.asm`: vedi `docs/notes/fase6-fs-shell.md`.)
+
 **Scrivere un programma nuovo:** crea `user/saluto.c` con un `main`, aggiungi
 `PROGRAMMA saluto` in `proc/user_programs.asm`, le due righe `extern` e la riga
 nella tabella di `proc/programs.c`; avvialo con `program_run("saluto")`.

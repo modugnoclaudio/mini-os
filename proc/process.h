@@ -179,7 +179,7 @@ void process_reap_terminated(void);
 /* Quanti processi esistono (compreso il processo 0). */
 uint32_t process_count(void);
 
-/* Stampa l'elenco dei processi con stato e tempo di CPU (sarà il comando `ps`). */
+/* Stampa l'elenco dei processi con stato e tempo di CPU (è ciò che mostra il comando `ps`). */
 void process_print_list(void);
 
 #endif /* PROC_PROCESS_H */
