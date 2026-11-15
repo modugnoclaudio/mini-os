@@ -34,6 +34,12 @@
  * USER_CODE_BASE deve coincidere con l'indirizzo scritto in user/user.ld.
  */
 #define USER_CODE_BASE    0x40000000
+
+/* Ogni programma inizia con 4 byte di riconoscimento, il "numero magico" (vedi
+ * user/lib/crt0.asm); la prima istruzione viene subito dopo. */
+#define PROGRAM_MAGIC         "MOS1"
+#define PROGRAM_MAGIC_LENGTH  4
+#define USER_ENTRY_POINT      (USER_CODE_BASE + PROGRAM_MAGIC_LENGTH)
 #define USER_IMAGE_PAGES  16            /* 16 pagine = 64 KiB per codice e dati */
 #define USER_STACK_TOP    0xB0000000
 #define USER_STACK_PAGES  4             /* 4 pagine = 16 KiB di stack utente    */
@@ -126,7 +132,8 @@ struct process *process_create(const char *name, void (*entry)(void));
 /*
  * Crea un processo utente a partire dall'immagine di un programma: `image` punta
  * ai byte del programma (un binario piatto, vedi user/user.ld) e `image_size` è la
- * loro quantità. Restituisce il PCB, o 0 se il programma è troppo grande o manca memoria.
+ * loro quantità. Restituisce il PCB, o 0 se i byte non sono un programma (manca il
+ * numero magico), se il programma è troppo grande o se manca memoria.
  */
 struct process *process_create_user(const char *name, const uint8_t *image, uint32_t image_size);
 

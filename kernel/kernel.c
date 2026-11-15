@@ -24,6 +24,8 @@
 #include "proc/process.h"
 #include "proc/scheduler.h"
 #include "proc/proctest.h"
+#include "fs/ramfs.h"
+#include "fs/fstest.h"
 
 /* Il valore che un bootloader Multiboot mette in EAX prima di saltare al kernel. */
 #define MULTIBOOT_BOOTLOADER_MAGIC 0x2BADB002
@@ -115,6 +117,10 @@ void kernel_main(uint32_t magic, uint32_t multiboot_info)
     memtest_address_spaces();
 
     memtest_summary();
+
+    /* --- Fase 6: filesystem --- */
+    fs_init();
+    fstest_run();
 
     timer_init();
     kprintf("Timer a %d Hz\n", TIMER_HZ);

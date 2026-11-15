@@ -82,8 +82,8 @@ OBJECTS := $(patsubst %.c,$(BUILD)/%.o,$(C_SOURCES)) \
 # I programmi in user/*.c NON fanno parte del kernel (infatti `user` non è in
 # SRC_DIRS). Ognuno diventa un file a sé, build/user/NOME.bin: un "binario piatto"
 # collegato con user/user.ld per girare all'indirizzo virtuale 0x40000000.
-# Il kernel li incorpora poi come dati (proc/user_programs.asm) e li carica in
-# processi separati.
+# Il kernel li incorpora poi come dati (fs/initial_files.asm): all'avvio diventano
+# file del filesystem in RAM, da cui vengono caricati in processi separati.
 USER_SOURCES := $(wildcard user/*.c)
 USER_BINS    := $(patsubst user/%.c,$(BUILD)/user/%.bin,$(USER_SOURCES))
 
@@ -111,9 +111,10 @@ $(KERNEL): $(OBJECTS) linker.ld
 $(BUILD)/user/%.bin: $(BUILD)/user/%.o $(USER_LIB_OBJECTS) user/user.ld
 	$(LD) -m elf_i386 -T user/user.ld --oformat binary -nostdlib -o $@ $(USER_LIB_OBJECTS) $<
 
-# Il file che incorpora i programmi nel kernel va riassemblato ogni volta che uno
-# di essi cambia: lo diciamo a make con una dipendenza esplicita.
-$(BUILD)/proc/user_programs.asm.o: $(USER_BINS)
+# Il file che incorpora nel kernel i file iniziali del filesystem (programmi utente
+# e file di fs/root/) va riassemblato ogni volta che uno di essi cambia: lo diciamo
+# a make con una dipendenza esplicita.
+$(BUILD)/fs/initial_files.asm.o: $(USER_BINS) $(wildcard fs/root/*)
 
 # make cancellerebbe da solo i file "intermedi" (i .o dei programmi utente) dopo
 # averli usati; questa riga glielo vieta, così non vengono ricompilati ogni volta.

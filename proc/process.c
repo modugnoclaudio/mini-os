@@ -80,7 +80,7 @@ static void process_trampoline(void)
          * Da qui in poi il kernel riprenderà il controllo solo attraverso un
          * interrupt, un'eccezione o una syscall.
          */
-        enter_user_mode(USER_CODE_BASE, USER_STACK_TOP);
+        enter_user_mode(USER_ENTRY_POINT, USER_STACK_TOP);
     }
 
     /* Thread del kernel. Si arriva qui dall'interno dello scheduler, che lavora a
@@ -240,8 +240,23 @@ static int map_user_region(uint32_t *directory, uint32_t virtual_start, uint32_t
 struct process *process_create_user(const char *name, const uint8_t *image, uint32_t image_size)
 {
     /* Il programma deve stare nello spazio che gli riserviamo. */
-    if (image == 0 || image_size == 0 || image_size > USER_IMAGE_PAGES * PAGE_SIZE) {
+    if (image == 0 || image_size > USER_IMAGE_PAGES * PAGE_SIZE) {
         return 0;
+    }
+
+    /*
+     * È davvero un programma? Controlliamo il numero magico nei primi 4 byte.
+     * Senza questo controllo si potrebbe "eseguire" un file di testo: la CPU
+     * interpreterebbe le lettere come istruzioni, con risultati imprevedibili.
+     */
+    const char *magic = PROGRAM_MAGIC;
+    if (image_size < PROGRAM_MAGIC_LENGTH) {
+        return 0;
+    }
+    for (uint32_t i = 0; i < PROGRAM_MAGIC_LENGTH; i++) {
+        if (image[i] != (uint8_t) magic[i]) {
+            return 0;
+        }
     }
 
     struct process *process = allocate_process(name);

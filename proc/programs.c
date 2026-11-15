@@ -1,62 +1,38 @@
 /*
- * proc/programs.c — Tabella dei programmi utente disponibili.
+ * proc/programs.c — Avvio di un programma a partire da un file.
  *
- * Fa da ponte tra un NOME ("hello") e i BYTE del programma, che stanno dentro il
- * kernel (proc/user_programs.asm). È un sostituto provvisorio del filesystem:
- * nella fase 6 i programmi si cercheranno tra i file.
+ * Fa da ponte tra il filesystem e i processi: dato un NOME, trova il file e ne fa
+ * un processo utente. È la parte "trova l'eseguibile" di ciò che sui sistemi Unix
+ * fa la chiamata exec.
+ *
+ * (Nella fase 5 qui c'era una tabella fissa di programmi incorporati nel kernel;
+ * ora i programmi sono normali file del filesystem in RAM.)
  */
 
 #include <stdint.h>
 #include "proc/programs.h"
 #include "proc/process.h"
-#include "lib/string.h"
-
-/*
- * Le etichette definite in proc/user_programs.asm. Non sono variabili con un
- * contenuto: sono solo INDIRIZZI (inizio e fine di ogni programma). Dichiararle
- * come array di byte permette di usarne il nome come puntatore al primo byte.
- */
-extern const uint8_t user_program_hello_start[];
-extern const uint8_t user_program_hello_end[];
-extern const uint8_t user_program_conta_start[];
-extern const uint8_t user_program_conta_end[];
-extern const uint8_t user_program_invasore_start[];
-extern const uint8_t user_program_invasore_end[];
-extern const uint8_t user_program_privilegiato_start[];
-extern const uint8_t user_program_privilegiato_end[];
-extern const uint8_t user_program_ciclo_start[];
-extern const uint8_t user_program_ciclo_end[];
-
-struct program {
-    const char *name;
-    const uint8_t *start;       /* primo byte del programma                 */
-    const uint8_t *end;         /* primo byte DOPO la fine del programma    */
-};
-
-static const struct program programs[] = {
-    { "hello",        user_program_hello_start,        user_program_hello_end },
-    { "conta",        user_program_conta_start,        user_program_conta_end },
-    { "invasore",     user_program_invasore_start,     user_program_invasore_end },
-    { "privilegiato", user_program_privilegiato_start, user_program_privilegiato_end },
-    { "ciclo",        user_program_ciclo_start,        user_program_ciclo_end },
-};
-
-/* Numero di elementi dell'array: dimensione totale diviso dimensione di un elemento.
- * È l'idioma del C per ottenere ciò che in Java è `programs.length`
- * (funziona solo sugli array veri, non sui puntatori). */
-#define PROGRAM_COUNT (sizeof(programs) / sizeof(programs[0]))
+#include "fs/ramfs.h"
+#include "kernel/interrupts.h"
 
 struct process *program_run(const char *name)
 {
-    for (uint32_t i = 0; i < PROGRAM_COUNT; i++) {
-        if (string_equals(programs[i].name, name)) {
-            /* La differenza tra due puntatori allo stesso array dà il numero di
-             * elementi tra loro: qui, la dimensione del programma in byte. */
-            uint32_t size = (uint32_t) (programs[i].end - programs[i].start);
+    /*
+     * SEZIONE CRITICA: tra il momento in cui troviamo il file e quello in cui
+     * process_create_user ha finito di copiarne il contenuto nelle pagine del nuovo
+     * processo, nessuno deve poter cancellare o sostituire il file. Altrimenti
+     * `file->data` punterebbe a memoria già liberata (un "use after free").
+     */
+    uint32_t flags = interrupts_save_and_disable();
 
-            return process_create_user(name, programs[i].start, size);
-        }
+    struct process *process = 0;
+
+    const struct file *file = fs_find(name);
+    if (file != 0) {
+        /* process_create_user controlla anche che il file sia davvero un programma. */
+        process = process_create_user(name, file->data, file->size);
     }
 
-    return 0;   /* nessun programma con quel nome */
+    interrupts_restore(flags);
+    return process;
 }

@@ -10,9 +10,19 @@
 
 extern main                     ; definita dal programma, in C
 
-; Sezione dal nome speciale: user/user.ld la mette all'inizio del file, perché il
-; kernel inizia l'esecuzione dal primo byte del programma.
+; Sezione dal nome speciale: user/user.ld la mette all'inizio del file.
 section .text.start
+
+; IL NUMERO MAGICO: i primi 4 byte di ogni programma sono sempre le lettere "MOS1"
+; (mini-os, versione 1). Prima di eseguire un file il kernel controlla che inizi
+; così: è il modo più semplice di distinguere un programma da un file qualsiasi
+; (prova a fare `run leggimi.txt` dalla shell).
+; È un'idea usata ovunque: i file ELF di Linux iniziano con 0x7F 'E' 'L' 'F', e i
+; file .class di Java con i quattro byte 0xCAFEBABE.
+    db "MOS1"
+
+; Il codice inizia subito dopo, cioè all'indirizzo 0x40000004: è lì che il kernel
+; fa partire l'esecuzione (USER_ENTRY_POINT in proc/process.h).
 global _start
 _start:
     ; Il kernel ci ha già dato uno stack (ESP punta alla sua cima) e ha impostato

@@ -393,6 +393,8 @@ void proctest_user_programs(void)
           kheap_get_used_bytes() == heap_used_before);
 
     check("un programma inesistente non parte", program_run("non-esiste") == 0);
+    check("un file che non e' un programma non viene eseguito",
+          program_run("benvenuto.txt") == 0);
 
     /* --- Due copie dello stesso programma: memoria separata --- */
     struct process *first = program_run("conta");

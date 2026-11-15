@@ -1,6 +1,6 @@
 /*
- * proc/programs.h — L'elenco dei programmi utente incorporati nel kernel.
- * Il codice è in proc/programs.c; i byte dei programmi in proc/user_programs.asm.
+ * proc/programs.h — Avvio di un programma a partire da un file.
+ * Il codice è in proc/programs.c.
  */
 #ifndef PROC_PROGRAMS_H
 #define PROC_PROGRAMS_H
@@ -8,8 +8,11 @@
 #include <stdint.h>
 #include "proc/process.h"
 
-/* Avvia come processo utente il programma con quel nome (es. "hello").
- * Restituisce il PCB del nuovo processo, o 0 se il programma non esiste o manca memoria. */
+/*
+ * Avvia come processo utente il programma contenuto nel file con quel nome
+ * (es. "hello"). Restituisce il PCB del nuovo processo, oppure 0 se il file non
+ * esiste, non è un programma o manca memoria.
+ */
 struct process *program_run(const char *name);
 
 #endif /* PROC_PROGRAMS_H */

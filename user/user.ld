@@ -7,9 +7,10 @@
  * piedi perché ogni processo ha il suo spazio di indirizzi (vedi mm/paging.c).
  *
  * Il risultato è un file "binario piatto": solo i byte di codice e dati, uno dopo
- * l'altro, senza intestazioni. Il kernel lo carica copiandolo così com'è a
- * 0x40000000 e saltando al primo byte. (I sistemi veri usano formati più ricchi,
- * come ELF, che descrivono sezioni, permessi e punto di ingresso.)
+ * l'altro. L'unica "intestazione" sono 4 byte di riconoscimento all'inizio (vedi
+ * user/lib/crt0.asm). Il kernel lo carica copiandolo così com'è a 0x40000000 e
+ * saltando subito dopo quei 4 byte. (I sistemi veri usano formati più ricchi, come
+ * ELF, che descrivono sezioni, permessi e punto di ingresso.)
  */
 
 ENTRY(_start)
@@ -21,8 +22,8 @@ SECTIONS
 
     .text :
     {
-        /* Il codice di avvio (user/lib/crt0.asm) va per PRIMO: il kernel inizia
-         * l'esecuzione dal primo byte del file, e lì deve trovare _start. */
+        /* Il codice di avvio (user/lib/crt0.asm) va per PRIMO: il kernel si aspetta
+         * all'inizio del file il numero magico e, subito dopo, _start. */
         *(.text.start)
         *(.text .text.*)
     }
