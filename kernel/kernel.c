@@ -137,6 +137,7 @@ void kernel_main(uint32_t magic, uint32_t multiboot_info)
     proctest_preemptive();
     proctest_syscalls();
     proctest_user_programs();
+    proctest_keyboard();
     proctest_summary();
 
     /*

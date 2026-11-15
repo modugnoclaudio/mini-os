@@ -185,6 +185,39 @@ void process_sleep(uint32_t ticks)
     interrupts_restore(flags);
 }
 
+void process_block(void)
+{
+    /* Come per sleep: il processo 0 deve restare sempre disponibile. */
+    if (current_process == idle_process) {
+        return;
+    }
+
+    uint32_t flags = interrupts_save_and_disable();
+
+    /*
+     * COLLEGAMENTO CON LA TEORIA: è la transizione "in esecuzione -> bloccato" del
+     * diagramma degli stati. Un processo che aspetta un tasto non deve consumare
+     * CPU controllando di continuo (attesa attiva): si toglie dai pronti, e sarà
+     * il gestore dell'interrupt della tastiera a rimettercelo.
+     * È la differenza con process_sleep(): lì si aspetta un ISTANTE, qui un EVENTO.
+     */
+    current_process->state = PROCESS_BLOCKED;
+    schedule();
+
+    interrupts_restore(flags);
+}
+
+void process_wake(struct process *process)
+{
+    uint32_t flags = interrupts_save_and_disable();
+
+    if (process != 0 && process->state == PROCESS_BLOCKED) {
+        process->state = PROCESS_READY;     /* lo scheduler lo sceglierà al suo turno */
+    }
+
+    interrupts_restore(flags);
+}
+
 uint32_t scheduler_get_switch_count(void)
 {
     return switch_count;

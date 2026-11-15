@@ -31,17 +31,19 @@
 #include "proc/scheduler.h"
 #include "mm/paging.h"
 #include "lib/kprintf.h"
+#include "drivers/keyboard.h"
 
 /*
- * Ogni syscall è una normale funzione C con al massimo tre argomenti interi.
+ * Ogni syscall è una normale funzione C con al massimo quattro argomenti interi.
  * Hanno tutte la stessa firma, così possono stare in un'unica tabella; chi non usa
  * un argomento lo ignora con il cast a (void), che evita l'avviso del compilatore.
  */
 
-static int32_t sys_exit(uint32_t exit_code, uint32_t unused1, uint32_t unused2)
+static int32_t sys_exit(uint32_t exit_code, uint32_t unused1, uint32_t unused2, uint32_t unused3)
 {
     (void) unused1;
     (void) unused2;
+    (void) unused3;
 
     process_exit((int32_t) exit_code);
     return 0;       /* mai raggiunto: process_exit non ritorna */
@@ -51,9 +53,10 @@ static int32_t sys_exit(uint32_t exit_code, uint32_t unused1, uint32_t unused2)
  * spenti: una stampa enorme bloccherebbe l'intero sistema. */
 #define WRITE_MAX_LENGTH 4096
 
-static int32_t sys_write(uint32_t text_address, uint32_t length, uint32_t unused)
+static int32_t sys_write(uint32_t text_address, uint32_t length, uint32_t unused1, uint32_t unused2)
 {
-    (void) unused;
+    (void) unused1;
+    (void) unused2;
 
     if (length > WRITE_MAX_LENGTH) {
         return -1;
@@ -84,29 +87,49 @@ static int32_t sys_write(uint32_t text_address, uint32_t length, uint32_t unused
     return (int32_t) length;
 }
 
-static int32_t sys_getpid(uint32_t unused1, uint32_t unused2, uint32_t unused3)
+static int32_t sys_read_key(uint32_t unused1, uint32_t unused2, uint32_t unused3, uint32_t unused4)
 {
     (void) unused1;
     (void) unused2;
     (void) unused3;
+    (void) unused4;
+
+    /*
+     * Una syscall BLOCCANTE: se non c'è nessun tasto in attesa, il processo viene
+     * sospeso qui dentro, a metà della syscall, e la CPU passa ad altri. Quando
+     * l'utente premerà un tasto il processo riprenderà da questo punto e la
+     * syscall ritornerà. Dal punto di vista del programma, la chiamata ha
+     * semplicemente "impiegato del tempo".
+     */
+    return (int32_t) (uint8_t) keyboard_read_char();
+}
+
+static int32_t sys_getpid(uint32_t unused1, uint32_t unused2, uint32_t unused3, uint32_t unused4)
+{
+    (void) unused1;
+    (void) unused2;
+    (void) unused3;
+    (void) unused4;
 
     return (int32_t) current_process->pid;
 }
 
-static int32_t sys_sleep(uint32_t ticks, uint32_t unused1, uint32_t unused2)
+static int32_t sys_sleep(uint32_t ticks, uint32_t unused1, uint32_t unused2, uint32_t unused3)
 {
     (void) unused1;
     (void) unused2;
+    (void) unused3;
 
     process_sleep(ticks);
     return 0;
 }
 
-static int32_t sys_yield(uint32_t unused1, uint32_t unused2, uint32_t unused3)
+static int32_t sys_yield(uint32_t unused1, uint32_t unused2, uint32_t unused3, uint32_t unused4)
 {
     (void) unused1;
     (void) unused2;
     (void) unused3;
+    (void) unused4;
 
     process_yield();
     return 0;
@@ -120,7 +143,7 @@ static int32_t sys_yield(uint32_t unused1, uint32_t unused2, uint32_t unused3)
  * funzione alla casella con quell'indice: così l'ordine delle righe non conta e non
  * si può sbagliare l'abbinamento numero-funzione.
  */
-typedef int32_t (*syscall_function_t)(uint32_t, uint32_t, uint32_t);
+typedef int32_t (*syscall_function_t)(uint32_t, uint32_t, uint32_t, uint32_t);
 
 static syscall_function_t syscall_table[SYSCALL_COUNT] = {
     [SYS_EXIT]   = sys_exit,
@@ -128,6 +151,7 @@ static syscall_function_t syscall_table[SYSCALL_COUNT] = {
     [SYS_GETPID] = sys_getpid,
     [SYS_SLEEP]  = sys_sleep,
     [SYS_YIELD]  = sys_yield,
+    [SYS_READ_KEY] = sys_read_key,
 };
 
 /*
@@ -149,7 +173,7 @@ static void syscall_handler(struct registers *regs)
         return;
     }
 
-    int32_t result = syscall_table[number](regs->ebx, regs->ecx, regs->edx);
+    int32_t result = syscall_table[number](regs->ebx, regs->ecx, regs->edx, regs->esi);
 
     /*
      * Il valore di ritorno: lo scriviamo nella copia salvata di EAX. Quando

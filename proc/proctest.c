@@ -18,6 +18,7 @@
 #include "mm/kheap.h"
 #include "mm/pmm.h"
 #include "proc/programs.h"
+#include "drivers/keyboard.h"
 #include "kernel/syscall_numbers.h"
 #include "lib/kprintf.h"
 #include "lib/string.h"
@@ -436,6 +437,72 @@ void proctest_user_programs(void)
           process_count() == 1);
     check("nessuna pagina di memoria e' andata persa",
           pmm_get_free_pages() == free_pages_before);
+}
+
+/* ---------------------------------------------------------------------------
+ * Prova 5: lettura BLOCCANTE dalla tastiera
+ * ---------------------------------------------------------------------------
+ * Un processo chiede un carattere quando non ce ne sono: deve bloccarsi (senza
+ * consumare CPU) e ripartire solo quando il carattere arriva. I tasti vengono
+ * "premuti" con keyboard_inject_char, che usa la stessa strada del vero interrupt.
+ */
+
+static char received_text[8];
+static volatile uint32_t received_count = 0;
+
+static void reader_thread(void)
+{
+    /* Legge tre caratteri: ogni chiamata blocca il processo finché non ne arriva uno. */
+    for (int i = 0; i < 3; i++) {
+        received_text[i] = keyboard_read_char();
+        received_text[i + 1] = '\0';
+        received_count++;
+    }
+    mark_finished();
+}
+
+/* Lascia passare qualche tick, dando agli altri processi il tempo di girare. */
+static void wait_ticks(int ticks)
+{
+    for (int i = 0; i < ticks; i++) {
+        __asm__ volatile ("hlt");
+    }
+}
+
+void proctest_keyboard(void)
+{
+    kprintf("Prova della lettura bloccante dalla tastiera:\n");
+    reset_shared_data();
+    received_count = 0;
+    received_text[0] = '\0';
+
+    struct process *reader = process_create("lettore", reader_thread);
+    check("creazione del processo lettore", reader != 0);
+    if (reader == 0) {
+        return;
+    }
+
+    wait_ticks(5);
+    check("senza tasti premuti il lettore e' bloccato",
+          reader->state == PROCESS_BLOCKED && received_count == 0);
+    check("un processo bloccato non consuma CPU", reader->cpu_ticks <= 1);
+
+    keyboard_inject_char('o');
+    wait_ticks(5);
+    check("arrivato un carattere, il lettore lo riceve e si blocca di nuovo",
+          received_count == 1 && reader->state == PROCESS_BLOCKED);
+
+    /* Due caratteri di fila: restano nel buffer finché il lettore non li prende. */
+    keyboard_inject_char('k');
+    keyboard_inject_char('!');
+    wait_for_exit(reader);
+
+    kprintf("  il lettore ha ricevuto: %s\n", received_text);
+    check("i caratteri arrivano tutti e nell'ordine giusto (coda FIFO)",
+          string_equals(received_text, "ok!"));
+    check("alla fine il buffer e' vuoto", keyboard_buffer_is_empty());
+
+    process_reap_terminated();
 }
 
 void proctest_summary(void)

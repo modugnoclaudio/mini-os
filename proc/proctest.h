@@ -20,6 +20,9 @@ void proctest_syscalls(void);
 /* Programmi in modalità utente: esecuzione, memoria separata, protezione. */
 void proctest_user_programs(void);
 
+/* Lettura bloccante dalla tastiera: un processo si blocca finché non arriva un tasto. */
+void proctest_keyboard(void);
+
 /* Stampa il riepilogo finale: quante verifiche sono fallite in tutto. */
 void proctest_summary(void);
 

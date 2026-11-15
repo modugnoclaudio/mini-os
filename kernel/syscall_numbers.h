@@ -8,7 +8,7 @@
  *
  * Convenzione di chiamata (decisa da noi, uguale a quella di Linux a 32 bit):
  *     EAX = numero della syscall
- *     EBX, ECX, EDX = primo, secondo e terzo argomento
+ *     EBX, ECX, EDX, ESI = primo, secondo, terzo e quarto argomento
  *     al ritorno, EAX = risultato (un valore negativo indica un errore)
  */
 #ifndef KERNEL_SYSCALL_NUMBERS_H
@@ -19,7 +19,8 @@
 #define SYS_GETPID  2   /* getpid(): restituisce il PID del processo                  */
 #define SYS_SLEEP   3   /* sleep(tick): sospende il processo per quel numero di tick  */
 #define SYS_YIELD   4   /* yield(): cede la CPU agli altri processi                   */
+#define SYS_READ_KEY 5  /* read_key(): attende un tasto e ne restituisce il carattere */
 
-#define SYSCALL_COUNT 5
+#define SYSCALL_COUNT 6
 
 #endif /* KERNEL_SYSCALL_NUMBERS_H */

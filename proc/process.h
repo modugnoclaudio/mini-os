@@ -44,10 +44,11 @@
  *                 scelto dallo scheduler
  *      PRONTO  ------------------------->  IN ESECUZIONE  ---> TERMINATO
  *        ^  ^  <-------------------------        |
- *        |  |     quanto scaduto / yield         | process_sleep()
+ *        |  |     quanto scaduto / yield         | process_sleep() / process_block()
  *        |  |                                    v
- *        |  +------------------------------  IN ATTESA
- *        |        il tempo è passato
+ *        |  +------------------------------  IN ATTESA / BLOCCATO
+ *        |     il tempo è passato / l'evento
+ *        |     atteso è arrivato
  *        +--- process_create()
  *
  * `enum` = un tipo con un elenco chiuso di valori, come gli enum di Java.
@@ -57,6 +58,8 @@ enum process_state {
     PROCESS_READY,          /* pronto: potrebbe girare, aspetta il suo turno        */
     PROCESS_RUNNING,        /* in esecuzione: sta usando la CPU adesso              */
     PROCESS_SLEEPING,       /* in attesa: dorme fino a un certo istante             */
+    PROCESS_BLOCKED,        /* bloccato: aspetta un evento (un tasto, la fine di un
+                               altro processo); qualcuno dovrà risvegliarlo         */
     PROCESS_TERMINATED      /* terminato: aspetta solo che la sua memoria sia liberata */
 };
 
@@ -134,6 +137,10 @@ void process_exit(int32_t exit_code);
 /* Termina d'autorità il processo corrente perché ha provocato un'eccezione
  * (accesso a memoria non sua, istruzione vietata...). Non ritorna mai. */
 void process_kill_current(struct registers *regs);
+
+/* Cerca un processo dato il suo PID. Restituisce 0 se non esiste (più).
+ * Va chiamata a interrupt disabilitati: la lista non deve cambiare durante la ricerca. */
+struct process *process_find(uint32_t pid);
 
 /* Termina un ALTRO processo (non quello corrente, non il processo 0), che in quel
  * momento è per forza fermo. La sua memoria verrà liberata da process_reap_terminated. */

@@ -325,6 +325,19 @@ void process_kill_current(struct registers *regs)
     process_exit(-1);
 }
 
+struct process *process_find(uint32_t pid)
+{
+    struct process *process = idle_process;
+    do {
+        if (process->pid == pid) {
+            return process;
+        }
+        process = process->next;
+    } while (process != idle_process);
+
+    return 0;
+}
+
 void process_kill(struct process *process)
 {
     uint32_t flags = interrupts_save_and_disable();
@@ -401,6 +414,7 @@ static const char *state_name(enum process_state state)
     case PROCESS_READY:      return "pronto";
     case PROCESS_RUNNING:    return "in esecuzione";
     case PROCESS_SLEEPING:   return "in attesa";
+    case PROCESS_BLOCKED:    return "bloccato";
     case PROCESS_TERMINATED: return "terminato";
     }
     return "?";
