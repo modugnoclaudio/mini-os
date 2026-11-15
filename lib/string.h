@@ -35,6 +35,13 @@ void *memcpy(void *destination, const void *source, uint32_t count);
  */
 void string_copy(char *destination, const char *source, uint32_t size);
 
+/* Restituisce la lunghezza di una stringa: il numero di caratteri prima del '\0'.
+ * È il `.length()` di Java, ma qui va CALCOLATO scorrendo la stringa ogni volta. */
+uint32_t string_length(const char *text);
+
+/* Restituisce 1 se `text` contiene `word` al suo interno (come String.contains). */
+int string_contains(const char *text, const char *word);
+
 /* Restituisce 1 se le due stringhe hanno gli stessi caratteri, 0 altrimenti.
  * In C `a == b` tra due stringhe confronta gli INDIRIZZI, non il contenuto
  * (come `==` tra due String in Java): serve una funzione, come `equals`. */

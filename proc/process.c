@@ -18,6 +18,8 @@
 #include "proc/process.h"
 #include "proc/scheduler.h"
 #include "mm/kheap.h"
+#include "mm/pmm.h"
+#include "mm/paging.h"
 #include "kernel/interrupts.h"
 #include "lib/kprintf.h"
 #include "lib/string.h"
@@ -27,6 +29,9 @@ struct process *current_process = 0;
 struct process *idle_process = 0;
 
 static uint32_t next_pid = 0;       /* il prossimo PID da assegnare */
+
+/* Definita in proc/usermode.asm: salta in modalità utente. Non ritorna mai. */
+extern void enter_user_mode(uint32_t entry_point, uint32_t user_stack);
 
 void process_init(void)
 {
@@ -46,10 +51,16 @@ void process_init(void)
     idle->state = PROCESS_RUNNING;      /* sta girando adesso */
     idle->esp = 0;                      /* verrà scritto al primo context switch */
     idle->stack = 0;                    /* usa lo stack di boot.asm: non è nostro da liberare */
+    idle->is_user = 0;
     idle->entry = 0;
+    idle->directory = paging_get_kernel_directory();
     idle->quantum_left = SCHEDULER_QUANTUM;
     idle->cpu_ticks = 0;
     idle->wake_tick = 0;
+    idle->exit_code = 0;
+    idle->killed_by = NOT_KILLED;
+    idle->parent_pid = 0;
+    idle->waiting_for_pid = 0;
     idle->next = idle;                  /* lista circolare con un solo elemento: punta a sé */
 
     idle_process = idle;
@@ -59,32 +70,48 @@ void process_init(void)
 /*
  * Il punto da cui parte ogni nuovo processo. Non viene mai chiamata con una
  * normale chiamata: ci si arriva con il `ret` di context_switch, grazie allo stack
- * costruito a mano in process_create (vedi sotto).
+ * costruito a mano in allocate_process (vedi sotto).
+ * Quando si arriva qui lo scheduler ha già reso attivi lo spazio di indirizzi e lo
+ * stack del kernel di questo processo.
  */
 static void process_trampoline(void)
 {
-    /* Si arriva qui dall'interno dello scheduler, che lavora a interrupt spenti.
-     * Un processo che è già stato in esecuzione li riaccende da solo quando riprende;
-     * uno appena nato deve farlo esplicitamente, altrimenti il timer non potrebbe
-     * mai più togliergli la CPU. */
+    if (current_process->is_user) {
+        /*
+         * Processo utente: si scende in modalità utente, all'inizio del programma.
+         * Da qui in poi il kernel riprenderà il controllo solo attraverso un
+         * interrupt, un'eccezione o una syscall.
+         */
+        enter_user_mode(USER_ENTRY_POINT, USER_STACK_TOP);
+    }
+
+    /* Thread del kernel. Si arriva qui dall'interno dello scheduler, che lavora a
+     * interrupt spenti: un processo appena nato deve riaccenderli, altrimenti il
+     * timer non potrebbe mai più togliergli la CPU. (Per un processo utente ci
+     * pensa enter_user_mode.) */
     interrupts_enable();
 
     current_process->entry();
 
     /* Se la funzione del processo ritorna, il processo è finito. Non può esserci un
      * `return` da qui: sullo stack non c'è nessun indirizzo a cui tornare. */
-    process_exit();
+    process_exit(0);
 }
 
-struct process *process_create(const char *name, void (*entry)(void))
+/*
+ * La parte comune a thread del kernel e processi utente: alloca il PCB e lo stack
+ * del kernel, e prepara lo stack perché il primo context switch porti in
+ * process_trampoline. Il processo NON viene ancora messo nella lista.
+ */
+static struct process *allocate_process(const char *name)
 {
     struct process *process = (struct process *) kmalloc(sizeof(struct process));
     if (process == 0) {
         return 0;
     }
 
-    /* Ogni processo ha uno stack tutto suo: è ciò che gli permette di avere le
-     * proprie variabili locali e la propria catena di chiamate. */
+    /* Ogni processo ha uno stack del kernel tutto suo: è ciò che gli permette di
+     * avere le proprie variabili locali e la propria catena di chiamate. */
     process->stack = kmalloc(KERNEL_STACK_SIZE);
     if (process->stack == 0) {
         kfree(process);
@@ -92,11 +119,17 @@ struct process *process_create(const char *name, void (*entry)(void))
     }
 
     string_copy(process->name, name, PROCESS_NAME_LENGTH);
-    process->entry = entry;
     process->state = PROCESS_READY;
+    process->is_user = 0;
+    process->entry = 0;
+    process->directory = paging_get_kernel_directory();
     process->quantum_left = SCHEDULER_QUANTUM;
     process->cpu_ticks = 0;
     process->wake_tick = 0;
+    process->exit_code = 0;
+    process->killed_by = NOT_KILLED;
+    process->parent_pid = 0;
+    process->waiting_for_pid = 0;
 
     /*
      * IL TRUCCO DELLO STACK INIZIALE.
@@ -126,11 +159,17 @@ struct process *process_create(const char *name, void (*entry)(void))
 
     process->esp = (uint32_t) sp;
 
-    /*
-     * Inserimento nella lista circolare, in fondo (cioè subito prima del processo 0).
-     * SEZIONE CRITICA: se il timer ci interrompesse a metà, lo scheduler seguirebbe
-     * una lista agganciata solo per metà.
-     */
+    return process;
+}
+
+/*
+ * Assegna il PID e inserisce il processo nella lista circolare, in fondo (cioè
+ * subito prima del processo 0). Da questo momento lo scheduler può sceglierlo.
+ * SEZIONE CRITICA: se il timer ci interrompesse a metà, lo scheduler seguirebbe
+ * una lista agganciata solo per metà.
+ */
+static void add_to_list(struct process *process)
+{
     uint32_t flags = interrupts_save_and_disable();
 
     process->pid = next_pid++;
@@ -143,11 +182,135 @@ struct process *process_create(const char *name, void (*entry)(void))
     process->next = idle_process;
 
     interrupts_restore(flags);
+}
 
+struct process *process_create(const char *name, void (*entry)(void))
+{
+    struct process *process = allocate_process(name);
+    if (process == 0) {
+        return 0;
+    }
+
+    process->entry = entry;
+
+    add_to_list(process);
     return process;
 }
 
-void process_exit(void)
+/*
+ * Mappa `page_count` pagine nuove e azzerate nello spazio di indirizzi indicato, a
+ * partire dall'indirizzo virtuale `virtual_start`. Se `image` non è nullo, vi copia
+ * dentro i primi `image_size` byte. Restituisce 1 se riesce, 0 se manca memoria.
+ */
+static int map_user_region(uint32_t *directory, uint32_t virtual_start, uint32_t page_count,
+                           const uint8_t *image, uint32_t image_size)
+{
+    for (uint32_t i = 0; i < page_count; i++) {
+        uint32_t frame = pmm_alloc_page();
+        if (frame == 0) {
+            return 0;
+        }
+
+        /*
+         * La pagina va azzerata: potrebbe contenere dati vecchi di un altro
+         * processo o del kernel, che il programma non deve poter leggere.
+         *
+         * Nota: scriviamo nella pagina usando `frame`, il suo indirizzo FISICO, che
+         * grazie alla mappatura in identità è valido anche come indirizzo virtuale
+         * del kernel. L'indirizzo utente (0x40000000...) qui non funzionerebbe: è
+         * valido solo nello spazio del nuovo processo, che non è quello attivo ora.
+         */
+        memset((void *) frame, 0, PAGE_SIZE);
+
+        /* Copia della fetta di programma che cade in questa pagina (se ce n'è). */
+        uint32_t offset = i * PAGE_SIZE;
+        if (image != 0 && offset < image_size) {
+            uint32_t bytes = image_size - offset;
+            if (bytes > PAGE_SIZE) {
+                bytes = PAGE_SIZE;
+            }
+            memcpy((void *) frame, image + offset, bytes);
+        }
+
+        if (!paging_map_user_page(directory, virtual_start + offset, frame, PAGE_WRITABLE)) {
+            pmm_free_page(frame);
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+struct process *process_create_user(const char *name, const uint8_t *image, uint32_t image_size)
+{
+    /* Il programma deve stare nello spazio che gli riserviamo. */
+    if (image == 0 || image_size > USER_IMAGE_PAGES * PAGE_SIZE) {
+        return 0;
+    }
+
+    /*
+     * È davvero un programma? Controlliamo il numero magico nei primi 4 byte.
+     * Senza questo controllo si potrebbe "eseguire" un file di testo: la CPU
+     * interpreterebbe le lettere come istruzioni, con risultati imprevedibili.
+     */
+    const char *magic = PROGRAM_MAGIC;
+    if (image_size < PROGRAM_MAGIC_LENGTH) {
+        return 0;
+    }
+    for (uint32_t i = 0; i < PROGRAM_MAGIC_LENGTH; i++) {
+        if (image[i] != (uint8_t) magic[i]) {
+            return 0;
+        }
+    }
+
+    struct process *process = allocate_process(name);
+    if (process == 0) {
+        return 0;
+    }
+
+    process->is_user = 1;
+
+    /*
+     * È il lavoro di un "loader": costruire lo spazio di indirizzi del processo e
+     * copiarvi il programma.
+     *   1. una page directory nuova, con il kernel già mappato e la zona utente vuota;
+     *   2. le pagine per codice e dati, con dentro l'immagine del programma;
+     *   3. le pagine per lo stack utente.
+     */
+    uint32_t *directory = paging_create_directory();
+
+    int ok = (directory != 0)
+          && map_user_region(directory, USER_CODE_BASE, USER_IMAGE_PAGES, image, image_size)
+          && map_user_region(directory, USER_STACK_TOP - USER_STACK_PAGES * PAGE_SIZE,
+                             USER_STACK_PAGES, 0, 0);
+
+    if (!ok) {
+        /* Memoria esaurita a metà: si restituisce tutto ciò che era stato preso.
+         * In C la pulizia in caso di errore va scritta a mano, ramo per ramo. */
+        paging_destroy_directory(directory);
+        kfree(process->stack);
+        kfree(process);
+        return 0;
+    }
+
+    process->directory = directory;
+
+    add_to_list(process);
+    return process;
+}
+
+/*
+ * Se il processo ha un genitore che ne sta aspettando la fine (syscall wait),
+ * lo risveglia. È l'evento che il genitore attendeva da bloccato.
+ */
+static void wake_parent(struct process *process)
+{
+    if (process->parent_pid != 0) {
+        process_wake(process_find(process->parent_pid));
+    }
+}
+
+void process_exit(int32_t exit_code)
 {
     /* Il processo 0 non può terminare: serve sempre qualcuno che possa girare. */
     if (current_process == idle_process) {
@@ -159,17 +322,160 @@ void process_exit(void)
 
     /*
      * Un processo non può liberare la propria memoria: sta ancora USANDO il proprio
-     * stack mentre esegue questa funzione. Si segna quindi come terminato e cede la
-     * CPU per sempre; a fare pulizia sarà il processo 0 (process_reap_terminated).
+     * stack (e il proprio spazio di indirizzi) mentre esegue questa funzione. Si
+     * segna quindi come terminato e cede la CPU per sempre; a fare pulizia sarà il
+     * processo 0 (process_reap_terminated).
      * Nei sistemi Unix un processo in questo stato si chiama "zombie".
      */
+    current_process->exit_code = exit_code;
     current_process->state = PROCESS_TERMINATED;
+    wake_parent(current_process);
     schedule();
 
     /* Qui non si arriva mai: lo scheduler non sceglie un processo terminato. */
     for (;;) {
         __asm__ volatile ("hlt");
     }
+}
+
+void process_kill_current(struct registers *regs)
+{
+    /*
+     * Un programma utente ha fatto qualcosa di vietato. A differenza di un errore
+     * del kernel (che porta al panic), qui il sistema è perfettamente sano: basta
+     * eliminare il colpevole. È ciò che su Linux si vede come "Segmentation fault".
+     *
+     * COLLEGAMENTO CON LA TEORIA: è la protezione in azione. L'errore di un
+     * processo non danneggia né il kernel né gli altri processi.
+     */
+    kprintf("  >>> processo %d (%s) terminato dal kernel: eccezione %d (%s) all'istruzione 0x%x\n",
+            current_process->pid, current_process->name,
+            regs->int_no, interrupt_exception_name(regs->int_no), regs->eip);
+
+    current_process->killed_by = (int32_t) regs->int_no;
+    process_exit(-1);
+}
+
+struct process *process_find(uint32_t pid)
+{
+    struct process *process = idle_process;
+    do {
+        if (process->pid == pid) {
+            return process;
+        }
+        process = process->next;
+    } while (process != idle_process);
+
+    return 0;
+}
+
+struct process *process_find_by_name(const char *name)
+{
+    struct process *process = idle_process;
+    do {
+        if (string_equals(process->name, name)) {
+            return process;
+        }
+        process = process->next;
+    } while (process != idle_process);
+
+    return 0;
+}
+
+void process_kill(struct process *process)
+{
+    uint32_t flags = interrupts_save_and_disable();
+
+    /*
+     * Con una sola CPU, se stiamo eseguendo questa funzione il processo bersaglio
+     * NON sta girando: è fermo dentro una chiamata a schedule(). Basta quindi
+     * segnarlo come terminato perché lo scheduler non lo scelga mai più; ciò che
+     * resta sul suo stack viene semplicemente abbandonato.
+     * È sicuro perché il nostro kernel non ha lock: un processo fermo non può
+     * avere "in mano" una risorsa che resterebbe bloccata per sempre.
+     */
+    if (process != idle_process && process != current_process
+        && process->state != PROCESS_TERMINATED) {
+        process->exit_code = -1;
+        process->state = PROCESS_TERMINATED;
+        wake_parent(process);
+    }
+
+    interrupts_restore(flags);
+}
+
+void process_interrupt_foreground(void)
+{
+    uint32_t flags = interrupts_save_and_disable();
+
+    /*
+     * Chi è "in primo piano"? Cerchiamo un processo bloccato in attesa di un figlio
+     * (la shell dopo `run`): il figlio è il programma che l'utente sta guardando.
+     * Se anche il figlio sta aspettando un proprio figlio (una shell lanciata da
+     * un'altra shell), si scende lungo la catena fino all'ultimo.
+     */
+    struct process *target = 0;
+
+    struct process *process = idle_process;
+    do {
+        if (process->state == PROCESS_BLOCKED && process->waiting_for_pid != 0) {
+            target = process_find(process->waiting_for_pid);
+            break;
+        }
+        process = process->next;
+    } while (process != idle_process);
+
+    while (target != 0 && target->state == PROCESS_BLOCKED && target->waiting_for_pid != 0) {
+        target = process_find(target->waiting_for_pid);
+    }
+
+    if (target == 0 || target == idle_process || target->state == PROCESS_TERMINATED) {
+        interrupts_restore(flags);
+        return;         /* nessun programma in primo piano: Ctrl+C non fa nulla */
+    }
+
+    kprintf("^C\n");
+
+    if (target == current_process) {
+        /*
+         * Il programma da fermare è proprio quello che stava girando quando è
+         * arrivato l'interrupt della tastiera: siamo sul SUO stack del kernel.
+         * Lo facciamo terminare "dall'interno", come se avesse chiamato exit.
+         * process_exit non ritorna: il resto del gestore dell'interrupt viene
+         * abbandonato insieme al processo.
+         */
+        process_exit(-1);
+    }
+
+    process_kill(target);
+    interrupts_restore(flags);
+}
+
+/*
+ * Si può liberare la memoria di questo processo?
+ *
+ * COLLEGAMENTO CON LA TEORIA: è la regola dei processi ZOMBIE di Unix. Un processo
+ * terminato non sparisce subito: il suo PCB deve restare finché il genitore non ne
+ * ha letto il codice di uscita con wait(). Se lo liberassimo prima, il genitore
+ * non potrebbe più sapere com'è finito.
+ */
+static int can_be_reaped(struct process *process)
+{
+    /* Non si libera mai il processo corrente: sta usando il proprio stack. */
+    if (process->state != PROCESS_TERMINATED || process == current_process) {
+        return 0;
+    }
+
+    /* Nessun genitore (creato dal kernel), oppure il genitore ha già fatto wait
+     * (che azzera parent_pid): nessuno aspetta più il codice di uscita. */
+    if (process->parent_pid == 0) {
+        return 1;
+    }
+
+    /* Il genitore non esiste più o è terminato a sua volta: il figlio è "orfano" e
+     * nessuno farà mai wait su di lui. */
+    struct process *parent = process_find(process->parent_pid);
+    return parent == 0 || parent->state == PROCESS_TERMINATED;
 }
 
 void process_reap_terminated(void)
@@ -182,9 +488,14 @@ void process_reap_terminated(void)
     struct process *process = idle_process->next;
 
     while (process != idle_process) {
-        /* Non si libera mai il processo corrente: sta usando il proprio stack. */
-        if (process->state == PROCESS_TERMINATED && process != current_process) {
+        if (can_be_reaped(process)) {
             previous->next = process->next;     /* sgancia dalla lista */
+
+            /* Un processo utente possiede anche uno spazio di indirizzi: la sua
+             * directory, le sue page table e tutte le pagine del programma. */
+            if (process->is_user) {
+                paging_destroy_directory(process->directory);
+            }
 
             kfree(process->stack);
             kfree(process);
@@ -221,6 +532,7 @@ static const char *state_name(enum process_state state)
     case PROCESS_READY:      return "pronto";
     case PROCESS_RUNNING:    return "in esecuzione";
     case PROCESS_SLEEPING:   return "in attesa";
+    case PROCESS_BLOCKED:    return "bloccato";
     case PROCESS_TERMINATED: return "terminato";
     }
     return "?";
@@ -236,8 +548,9 @@ void process_print_list(void)
 
     struct process *process = idle_process;
     do {
-        kprintf("    pid %d  %s  (%s, %d tick di CPU)\n",
+        kprintf("    pid %d  %s  (%s, %s, %d tick di CPU)\n",
                 process->pid, process->name,
+                process->is_user ? "utente" : "kernel",
                 state_name(process->state), process->cpu_ticks);
         process = process->next;
     } while (process != idle_process);

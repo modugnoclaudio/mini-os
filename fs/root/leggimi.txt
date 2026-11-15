@@ -1,0 +1,12 @@
+mini-os: un sistema operativo didattico per x86 a 32 bit.
+
+Cosa c'e' sotto questa shell:
+  - un kernel avviato con Multiboot, con interrupt, timer e tastiera
+  - memoria virtuale con paginazione e un heap (kmalloc)
+  - processi con scheduler round-robin e prelazione
+  - programmi in modalita' utente che parlano col kernel tramite syscall
+  - un filesystem in RAM: i file spariscono allo spegnimento
+
+Prova:  ls   poi   run hello   poi   ps
+I programmi 'invasore' e 'privilegiato' violano le regole apposta:
+il kernel li ferma senza bloccarsi.

@@ -1,0 +1,3 @@
+Benvenuto in mini-os!
+Questo testo e' un file del filesystem in RAM.
+Scrivi 'help' per vedere i comandi disponibili.

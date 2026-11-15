@@ -16,7 +16,11 @@
 
 /* Il campo `flags` dice quali altri campi sono validi: un bit per ciascuno.
  * Il bit 6 riguarda la mappa della memoria. */
-#define MULTIBOOT_FLAG_MMAP (1 << 6)
+#define MULTIBOOT_FLAG_MMAP    (1 << 6)
+
+/* Il bit 2 riguarda la "riga di comando": un testo che chi avvia il kernel può
+ * passargli (con QEMU: l'opzione -append). */
+#define MULTIBOOT_FLAG_CMDLINE (1 << 2)
 
 /* Tipo di una zona di memoria: 1 = RAM libera. Qualsiasi altro valore = non toccare
  * (riservata al BIOS, tabelle ACPI, memoria difettosa...). */
@@ -29,7 +33,7 @@ struct multiboot_info {
     uint32_t mem_lower;     /* KiB di memoria sotto 1 MiB                           */
     uint32_t mem_upper;     /* KiB di memoria sopra 1 MiB                           */
     uint32_t boot_device;
-    uint32_t cmdline;
+    uint32_t cmdline;       /* indirizzo fisico della riga di comando (una stringa) */
     uint32_t mods_count;
     uint32_t mods_addr;
     uint32_t syms[4];

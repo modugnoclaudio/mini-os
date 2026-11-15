@@ -160,6 +160,98 @@ void memtest_heap(void)
     kheap_dump();
 }
 
+void memtest_address_spaces(void)
+{
+    kprintf("Prova degli spazi di indirizzi separati:\n");
+
+    uint32_t free_before = pmm_get_free_pages();
+
+    /* Due spazi di indirizzi, come se fossero di due processi diversi. */
+    uint32_t *space_a = paging_create_directory();
+    uint32_t *space_b = paging_create_directory();
+    check("creazione di due page directory",
+          space_a != 0 && space_b != 0 && space_a != space_b);
+
+    /* In ENTRAMBI mappiamo lo stesso indirizzo virtuale, ma su due pagine fisiche diverse. */
+    uint32_t user_address = USER_SPACE_START;
+    uint32_t frame_a = pmm_alloc_page();
+    uint32_t frame_b = pmm_alloc_page();
+    check("stessa pagina virtuale mappata in entrambi",
+          paging_map_user_page(space_a, user_address, frame_a, PAGE_WRITABLE) &&
+          paging_map_user_page(space_b, user_address, frame_b, PAGE_WRITABLE));
+
+    /* Scriviamo un valore diverso in ciascuna pagina fisica, raggiungendole dal
+     * kernel tramite la mappatura in identità. */
+    *(volatile uint32_t *) frame_a = 0xAAAAAAAA;
+    *(volatile uint32_t *) frame_b = 0xBBBBBBBB;
+
+    /* Un blocco dell'heap del kernel: deve restare visibile da qualsiasi spazio. */
+    uint32_t *kernel_data = (uint32_t *) kmalloc(sizeof(uint32_t));
+    *kernel_data = 0x12345678;
+
+    /* Ora "entriamo" nei due spazi, uno alla volta, e leggiamo lo STESSO indirizzo. */
+    volatile uint32_t *user_pointer = (volatile uint32_t *) user_address;
+
+    paging_switch_directory(space_a);
+    uint32_t seen_in_a = *user_pointer;
+    uint32_t kernel_seen_in_a = *kernel_data;
+
+    paging_switch_directory(space_b);
+    uint32_t seen_in_b = *user_pointer;
+
+    paging_switch_directory(paging_get_kernel_directory());
+
+    kprintf("  all'indirizzo 0x%x: nello spazio A c'e' 0x%x, nello spazio B 0x%x\n",
+            user_address, seen_in_a, seen_in_b);
+    check("lo stesso indirizzo virtuale porta a dati diversi (isolamento)",
+          seen_in_a == 0xAAAAAAAA && seen_in_b == 0xBBBBBBBB);
+    check("il kernel e' mappato uguale in ogni spazio", kernel_seen_in_a == 0x12345678);
+    check("nello spazio del kernel la zona utente non e' mappata",
+          paging_get_physical(user_address) == 0);
+
+    /* I controlli che le syscall faranno sui puntatori ricevuti dai programmi. */
+    check("una zona utente mappata viene accettata",
+          paging_is_user_range(space_a, user_address, PAGE_SIZE));
+    check("una zona che sconfina oltre la pagina mappata viene rifiutata",
+          !paging_is_user_range(space_a, user_address, PAGE_SIZE + 1));
+    check("un indirizzo del kernel viene rifiutato",
+          !paging_is_user_range(space_a, 0x100000, 4));
+    check("una zona che supera i 4 GiB e riparte da zero viene rifiutata",
+          !paging_is_user_range(space_a, 0xFFFFFFF0, 0x20));
+    check("non si puo' mappare una pagina utente sopra il kernel",
+          !paging_map_user_page(space_a, 0x100000, frame_a, PAGE_WRITABLE));
+
+    /* Distruggere uno spazio libera anche le pagine utente che contiene
+     * (frame_a e frame_b): non vanno liberate di nuovo a mano. */
+    kfree(kernel_data);
+    paging_destroy_directory(space_a);
+    paging_destroy_directory(space_b);
+    check("distruggendo gli spazi tutta la memoria torna libera",
+          pmm_get_free_pages() == free_before);
+
+    /*
+     * Ultima verifica: l'heap del kernel che CRESCE mentre è attivo lo spazio di un
+     * processo. Le nuove pagine devono essere visibili anche tornando nello spazio
+     * del kernel: funziona solo perché le page table dell'heap sono condivise
+     * (paging_reserve_kernel_tables).
+     */
+    uint32_t *space_c = paging_create_directory();
+    paging_switch_directory(space_c);
+
+    uint32_t big_size = 64 * 1024;
+    volatile uint8_t *big = (volatile uint8_t *) kmalloc(big_size);
+    if (big != 0) {
+        big[big_size - 1] = 0x5A;
+    }
+
+    paging_switch_directory(paging_get_kernel_directory());
+    check("l'heap cresciuto dentro un processo e' visibile anche dal kernel",
+          big != 0 && big[big_size - 1] == 0x5A);
+
+    kfree((void *) big);
+    paging_destroy_directory(space_c);
+}
+
 void memtest_summary(void)
 {
     if (failures == 0) {

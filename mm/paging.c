@@ -46,6 +46,7 @@
 #include "mm/paging.h"
 #include "mm/pmm.h"
 #include "kernel/interrupts.h"
+#include "proc/process.h"
 #include "lib/kprintf.h"
 #include "lib/string.h"
 
@@ -60,8 +61,12 @@
  * esattamente una pagina. Non è un array dichiarato qui: è una pagina chiesta
  * all'allocatore fisico, e questo puntatore ne contiene l'indirizzo.
  * Grazie alla mappatura in identità, quell'indirizzo fisico vale anche come virtuale.
+ *
+ * Dalla fase 5 non è più l'unica: ogni processo utente ha la propria directory
+ * (vedi paging_create_directory). Questa è quella "di base", usata dai thread del
+ * kernel e copiata come punto di partenza per le altre.
  */
-static uint32_t *page_directory = 0;
+static uint32_t *kernel_directory = 0;
 
 /* Estraggono i due indici da un indirizzo virtuale.
  * `>> 22` butta via i 22 bit bassi e lascia i 10 più alti.
@@ -77,10 +82,15 @@ static uint32_t table_index(uint32_t virtual_address)
 }
 
 /*
- * Restituisce la page table che copre `virtual_address`.
+ * Restituisce la page table che, nella directory indicata, copre `virtual_address`.
  * Se non esiste ancora: con `create` = 1 la crea, con `create` = 0 restituisce 0.
+ *
+ * Tutte le funzioni interne ricevono la directory su cui lavorare: così lo stesso
+ * codice serve sia per il kernel sia per lo spazio di indirizzi di un processo.
+ * Possiamo scrivere nella directory di QUALSIASI processo, anche se non è quella
+ * attiva: è una pagina fisica come le altre, raggiungibile tramite l'identità.
  */
-static uint32_t *get_page_table(uint32_t virtual_address, int create)
+static uint32_t *get_page_table(uint32_t *page_directory, uint32_t virtual_address, int create)
 {
     uint32_t index = directory_index(virtual_address);
 
@@ -109,9 +119,11 @@ static uint32_t *get_page_table(uint32_t virtual_address, int create)
     return (uint32_t *) (page_directory[index] & ADDRESS_MASK);
 }
 
-int paging_map_page(uint32_t virtual_address, uint32_t physical_address, uint32_t flags)
+/* Il lavoro vero di mappatura, su una directory qualsiasi. */
+static int map_page_in(uint32_t *page_directory, uint32_t virtual_address,
+                       uint32_t physical_address, uint32_t flags)
 {
-    uint32_t *table = get_page_table(virtual_address, 1);
+    uint32_t *table = get_page_table(page_directory, virtual_address, 1);
     if (table == 0) {
         return 0;
     }
@@ -137,9 +149,26 @@ int paging_map_page(uint32_t virtual_address, uint32_t physical_address, uint32_
     return 1;
 }
 
+int paging_map_page(uint32_t virtual_address, uint32_t physical_address, uint32_t flags)
+{
+    return map_page_in(kernel_directory, virtual_address, physical_address, flags);
+}
+
+int paging_map_user_page(uint32_t *page_directory, uint32_t virtual_address,
+                         uint32_t physical_address, uint32_t flags)
+{
+    /* Una pagina utente può stare solo nella zona riservata ai programmi: non deve
+     * mai poter coprire una mappatura del kernel. */
+    if (virtual_address < USER_SPACE_START || virtual_address >= USER_SPACE_END) {
+        return 0;
+    }
+
+    return map_page_in(page_directory, virtual_address, physical_address, flags | PAGE_USER);
+}
+
 void paging_unmap_page(uint32_t virtual_address)
 {
-    uint32_t *table = get_page_table(virtual_address, 0);
+    uint32_t *table = get_page_table(kernel_directory, virtual_address, 0);
     if (table == 0) {
         return;     /* non c'è nemmeno la tabella: niente da cancellare */
     }
@@ -151,7 +180,7 @@ void paging_unmap_page(uint32_t virtual_address)
 uint32_t paging_get_physical(uint32_t virtual_address)
 {
     /* Rifacciamo in C, passo per passo, ciò che la MMU fa in hardware. */
-    uint32_t *table = get_page_table(virtual_address, 0);
+    uint32_t *table = get_page_table(kernel_directory, virtual_address, 0);
     if (table == 0) {
         return 0;
     }
@@ -163,6 +192,141 @@ uint32_t paging_get_physical(uint32_t virtual_address)
 
     /* Indirizzo della pagina fisica + spostamento dentro la pagina (i 12 bit bassi). */
     return (entry & ADDRESS_MASK) + (virtual_address & 0xFFF);
+}
+
+/* ---------------------------------------------------------------------------
+ * Spazi di indirizzi dei processi
+ * ---------------------------------------------------------------------------
+ * COLLEGAMENTO CON LA TEORIA: ogni processo ha il proprio SPAZIO DI INDIRIZZI
+ * virtuale, cioè la propria tabella delle pagine. Lo stesso indirizzo virtuale
+ * (es. 0x40000000) in due processi diversi porta a due pagine fisiche diverse:
+ * è così che i processi sono isolati l'uno dall'altro.
+ *
+ * Com'è fatta la directory di un processo (1024 righe, 4 MiB ciascuna):
+ *
+ *    righe   0 - 255   0x00000000 - 0x3FFFFFFF   kernel: RAM in identità    } uguali in
+ *    righe 256 - 767   0x40000000 - 0xBFFFFFFF   PROGRAMMA UTENTE (privato)
+ *    righe 768 - 1023  0xC0000000 - 0xFFFFFFFF   kernel: heap e altro       } tutti i processi
+ *
+ * Le righe del kernel sono COPIATE dalla directory del kernel, e quindi puntano
+ * alle STESSE page table: il kernel è mappato in ogni processo, sempre agli stessi
+ * indirizzi. Per questo quando arriva un interrupt o una syscall non serve cambiare
+ * spazio di indirizzi: il codice del kernel è già lì. Il programma però non può
+ * toccarlo, perché quelle pagine non hanno il permesso PAGE_USER.
+ */
+
+/* Gli indici delle righe della directory che appartengono alla zona utente. */
+#define USER_FIRST_ENTRY (USER_SPACE_START >> 22)       /* 256 */
+#define USER_LAST_ENTRY  (USER_SPACE_END >> 22)         /* 768, escluso */
+
+uint32_t *paging_get_kernel_directory(void)
+{
+    return kernel_directory;
+}
+
+void paging_reserve_kernel_tables(uint32_t start, uint32_t size)
+{
+    /*
+     * Crea subito, vuote, le page table di una zona del kernel.
+     *
+     * Perché serve: le directory dei processi copiano le RIGHE di quella del kernel.
+     * Se una page table del kernel venisse creata più tardi, la nuova riga
+     * comparirebbe solo nella directory del kernel e non in quelle già copiate:
+     * il kernel, girando "dentro" un processo, non vedrebbe quella memoria.
+     * Creando le tabelle in anticipo, tutte le copie puntano già a quelle giuste,
+     * e ciò che vi si mappa in seguito è visibile ovunque.
+     */
+    for (uint32_t address = start; address < start + size; address += 4 * 1024 * 1024) {
+        get_page_table(kernel_directory, address, 1);
+    }
+}
+
+uint32_t *paging_create_directory(void)
+{
+    uint32_t *directory = (uint32_t *) pmm_alloc_page();
+    if (directory == 0) {
+        return 0;
+    }
+
+    /* Punto di partenza: una copia esatta della directory del kernel. Si copiano
+     * 1024 numeri, NON le page table: quelle restano condivise. La zona utente
+     * nella directory del kernel è vuota, quindi nasce vuota anche qui. */
+    memcpy(directory, kernel_directory, PAGE_SIZE);
+
+    return directory;
+}
+
+void paging_destroy_directory(uint32_t *page_directory)
+{
+    /* Mai distruggere la directory del kernel, né una mancante. */
+    if (page_directory == 0 || page_directory == kernel_directory) {
+        return;
+    }
+
+    /* Si libera SOLO la zona utente: le page table del kernel sono condivise con
+     * tutti gli altri processi e devono restare. */
+    for (uint32_t i = USER_FIRST_ENTRY; i < USER_LAST_ENTRY; i++) {
+        if (!(page_directory[i] & PAGE_PRESENT)) {
+            continue;
+        }
+
+        uint32_t *table = (uint32_t *) (page_directory[i] & ADDRESS_MASK);
+
+        /* Prima le pagine di memoria del programma... */
+        for (uint32_t j = 0; j < ENTRIES_PER_TABLE; j++) {
+            if (table[j] & PAGE_PRESENT) {
+                pmm_free_page(table[j] & ADDRESS_MASK);
+            }
+        }
+
+        /* ...poi la page table stessa. */
+        pmm_free_page((uint32_t) table);
+    }
+
+    /* Infine la pagina che conteneva la directory. */
+    pmm_free_page((uint32_t) page_directory);
+}
+
+void paging_switch_directory(uint32_t *page_directory)
+{
+    /*
+     * Scrivere in CR3 cambia lo spazio di indirizzi attivo: da questa istruzione
+     * in poi la MMU traduce gli indirizzi con le tabelle del nuovo processo.
+     * Il kernel continua a funzionare perché è mappato uguale in tutte le directory.
+     *
+     * Effetto collaterale: la CPU svuota il TLB (le traduzioni in cache erano
+     * dell'altro processo). È una delle ragioni per cui a lezione si dice che il
+     * cambio di contesto tra processi costa più di quello tra thread.
+     */
+    __asm__ volatile ("mov %0, %%cr3" : : "r"(page_directory));
+}
+
+int paging_is_user_range(uint32_t *page_directory, uint32_t start, uint32_t length)
+{
+    uint32_t end = start + length;
+
+    /* La zona deve stare tutta nello spazio utente. `end < start` rivela una somma
+     * che ha superato i 32 bit ed è ripartita da zero: un trucco classico per
+     * ingannare controlli fatti male. */
+    if (end < start || start < USER_SPACE_START || end > USER_SPACE_END) {
+        return 0;
+    }
+
+    /* E ogni pagina toccata deve essere davvero mappata e accessibile all'utente.
+     * `start & ADDRESS_MASK` arrotonda all'inizio della pagina che contiene `start`. */
+    for (uint32_t address = start & ADDRESS_MASK; address < end; address += PAGE_SIZE) {
+        uint32_t *table = get_page_table(page_directory, address, 0);
+        if (table == 0) {
+            return 0;
+        }
+
+        uint32_t entry = table[table_index(address)];
+        if (!(entry & PAGE_PRESENT) || !(entry & PAGE_USER)) {
+            return 0;
+        }
+    }
+
+    return 1;
 }
 
 /*
@@ -196,14 +360,20 @@ static void page_fault_handler(struct registers *regs)
         kprintf("  (indirizzo nella pagina 0: quasi certamente un puntatore nullo)\n");
     }
 
+    /* Colpa di un programma utente: si termina il processo e il sistema prosegue.
+     * Colpa del kernel: non resta che fermarsi. */
+    if (user) {
+        process_kill_current(regs);
+    }
+
     interrupt_panic(regs);
 }
 
 void paging_init(void)
 {
     /* La directory: una pagina, azzerata (nessuna page table presente). */
-    page_directory = (uint32_t *) pmm_alloc_page();
-    memset(page_directory, 0, PAGE_SIZE);
+    kernel_directory = (uint32_t *) pmm_alloc_page();
+    memset(kernel_directory, 0, PAGE_SIZE);
 
     /*
      * Mappatura in identità di tutta la RAM: virtuale = fisico.
@@ -227,7 +397,7 @@ void paging_init(void)
     interrupt_register_handler(INT_PAGE_FAULT, page_fault_handler);
 
     /* CR3 = indirizzo FISICO della page directory: è da lì che la MMU parte. */
-    __asm__ volatile ("mov %0, %%cr3" : : "r"(page_directory));
+    __asm__ volatile ("mov %0, %%cr3" : : "r"(kernel_directory));
 
     /*
      * Accensione: bit 31 (PG) del registro CR0.

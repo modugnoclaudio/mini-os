@@ -206,6 +206,10 @@ void kheap_init(void)
 {
     first_block = 0;
     heap_end = KHEAP_START;
+
+    /* Le page table dell'heap vanno create subito, anche se vuote: così tutti i
+     * processi futuri le condivideranno (spiegazione in paging_reserve_kernel_tables). */
+    paging_reserve_kernel_tables(KHEAP_START, KHEAP_MAX_SIZE);
     kprintf("Heap del kernel a 0x%x (massimo %d MiB), cresce a richiesta\n",
             KHEAP_START, KHEAP_MAX_SIZE / (1024 * 1024));
 }

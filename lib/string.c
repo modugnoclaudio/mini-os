@@ -59,3 +59,29 @@ int string_equals(const char *a, const char *b)
     /* Sono uguali solo se ci siamo fermati alla fine di ENTRAMBE. */
     return *a == *b;
 }
+
+uint32_t string_length(const char *text)
+{
+    uint32_t length = 0;
+    while (text[length] != '\0') {
+        length++;
+    }
+    return length;
+}
+
+int string_contains(const char *text, const char *word)
+{
+    /* Per ogni posizione di `text` si prova a far combaciare `word` a partire da lì.
+     * È l'algoritmo più semplice (e più lento) di ricerca di una sottostringa. */
+    for (uint32_t start = 0; text[start] != '\0'; start++) {
+        uint32_t i = 0;
+        while (word[i] != '\0' && text[start + i] == word[i]) {
+            i++;
+        }
+        if (word[i] == '\0') {
+            return 1;       /* siamo arrivati in fondo a `word`: trovata */
+        }
+    }
+
+    return word[0] == '\0';     /* la stringa vuota è contenuta in qualsiasi stringa */
+}

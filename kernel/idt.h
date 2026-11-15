@@ -8,6 +8,10 @@
 /* Quanti interrupt gestiamo: 32 eccezioni della CPU + 16 interrupt hardware (IRQ). */
 #define INTERRUPT_STUB_COUNT 48
 
+/* Numero dell'interrupt usato per le chiamate di sistema (syscall). È una scelta
+ * nostra: 0x80 è quello storico di Linux. */
+#define INT_SYSCALL 0x80
+
 /* Costruisce la IDT e dice alla CPU di usarla. Non abilita gli interrupt. */
 void idt_init(void);
 

@@ -1,19 +1,48 @@
 /*
- * proc/process.h — I processi del kernel e il loro descrittore (PCB).
+ * proc/process.h — I processi e il loro descrittore (PCB).
  * Il codice è in proc/process.c.
  *
- * NOTA SUI TERMINI: per ora i nostri "processi" sono in realtà THREAD DEL KERNEL:
- * ognuno ha il proprio stack e i propri registri, ma condividono tutti la stessa
- * memoria (quella del kernel). Diventeranno processi veri, con memoria separata e
- * modalità utente, nella fase 5.
+ * Esistono due tipi di processo:
+ *   - THREAD DEL KERNEL: eseguono una funzione del kernel, in modalità kernel,
+ *     e condividono tutti la memoria del kernel (fase 4);
+ *   - PROCESSI UTENTE: eseguono un programma caricato a parte, in modalità utente,
+ *     ciascuno nel proprio spazio di indirizzi (fase 5).
+ * Lo scheduler li tratta allo stesso modo.
  */
 #ifndef PROC_PROCESS_H
 #define PROC_PROCESS_H
 
 #include <stdint.h>
+#include "kernel/interrupts.h"
 
 #define PROCESS_NAME_LENGTH 16
-#define KERNEL_STACK_SIZE   8192    /* 8 KiB di stack per ogni processo */
+#define KERNEL_STACK_SIZE   8192    /* 8 KiB di stack del kernel per ogni processo */
+
+/*
+ * La disposizione della memoria di un processo utente (indirizzi VIRTUALI, uguali
+ * per tutti i processi: ognuno ha il suo spazio di indirizzi).
+ *
+ *   0x40000000  +---------------------------+  USER_CODE_BASE
+ *               | codice e dati del         |
+ *               | programma (64 KiB)        |
+ *   0x40010000  +---------------------------+
+ *               |        (non mappato)      |
+ *   0xAFFFC000  +---------------------------+
+ *               | stack utente (16 KiB)     |  cresce verso il basso
+ *   0xB0000000  +---------------------------+  USER_STACK_TOP
+ *
+ * USER_CODE_BASE deve coincidere con l'indirizzo scritto in user/user.ld.
+ */
+#define USER_CODE_BASE    0x40000000
+
+/* Ogni programma inizia con 4 byte di riconoscimento, il "numero magico" (vedi
+ * user/lib/crt0.asm); la prima istruzione viene subito dopo. */
+#define PROGRAM_MAGIC         "MOS1"
+#define PROGRAM_MAGIC_LENGTH  4
+#define USER_ENTRY_POINT      (USER_CODE_BASE + PROGRAM_MAGIC_LENGTH)
+#define USER_IMAGE_PAGES  16            /* 16 pagine = 64 KiB per codice e dati */
+#define USER_STACK_TOP    0xB0000000
+#define USER_STACK_PAGES  4             /* 4 pagine = 16 KiB di stack utente    */
 
 /*
  * Gli stati di un processo: è il diagramma degli stati visto a lezione.
@@ -21,10 +50,11 @@
  *                 scelto dallo scheduler
  *      PRONTO  ------------------------->  IN ESECUZIONE  ---> TERMINATO
  *        ^  ^  <-------------------------        |
- *        |  |     quanto scaduto / yield         | process_sleep()
+ *        |  |     quanto scaduto / yield         | process_sleep() / process_block()
  *        |  |                                    v
- *        |  +------------------------------  IN ATTESA
- *        |        il tempo è passato
+ *        |  +------------------------------  IN ATTESA / BLOCCATO
+ *        |     il tempo è passato / l'evento
+ *        |     atteso è arrivato
  *        +--- process_create()
  *
  * `enum` = un tipo con un elenco chiuso di valori, come gli enum di Java.
@@ -34,8 +64,13 @@ enum process_state {
     PROCESS_READY,          /* pronto: potrebbe girare, aspetta il suo turno        */
     PROCESS_RUNNING,        /* in esecuzione: sta usando la CPU adesso              */
     PROCESS_SLEEPING,       /* in attesa: dorme fino a un certo istante             */
+    PROCESS_BLOCKED,        /* bloccato: aspetta un evento (un tasto, la fine di un
+                               altro processo); qualcuno dovrà risvegliarlo         */
     PROCESS_TERMINATED      /* terminato: aspetta solo che la sua memoria sia liberata */
 };
+
+/* Valore di `killed_by` per un processo che è terminato di propria volontà. */
+#define NOT_KILLED (-1)
 
 /*
  * Il PCB (Process Control Block): tutto ciò che il kernel sa di un processo.
@@ -48,17 +83,43 @@ struct process {
 
     /*
      * Il CONTESTO salvato. Quando il processo non è in esecuzione, i suoi registri
-     * stanno in cima al SUO stack; qui ricordiamo solo dove (il valore di ESP).
-     * È tutto ciò che serve per riprenderlo: vedi proc/switch.asm.
+     * stanno in cima al SUO stack del kernel; qui ricordiamo solo dove (il valore
+     * di ESP). È tutto ciò che serve per riprenderlo: vedi proc/switch.asm.
      */
     uint32_t esp;
 
-    void *stack;                        /* inizio della memoria dello stack (0 per il processo 0) */
-    void (*entry)(void);                /* la funzione che il processo esegue           */
+    /*
+     * Lo STACK DEL KERNEL del processo (0 per il processo 0, che usa quello di boot.asm).
+     * Un processo utente ha DUE stack: quello utente, nella sua memoria, per il
+     * proprio codice; e questo, usato quando si entra nel kernel per una syscall o
+     * un interrupt. Il kernel non può fidarsi dello stack di un programma.
+     */
+    void *stack;
+
+    int is_user;                        /* 1 = processo utente, 0 = thread del kernel   */
+    void (*entry)(void);                /* thread del kernel: la funzione da eseguire   */
+
+    /* Lo SPAZIO DI INDIRIZZI: la page directory da caricare in CR3 quando il
+     * processo gira. I thread del kernel usano tutti quella del kernel. */
+    uint32_t *directory;
 
     uint32_t quantum_left;              /* tick rimasti prima di cedere la CPU          */
     uint32_t cpu_ticks;                 /* tick di CPU consumati in totale              */
     uint32_t wake_tick;                 /* se dorme: a quale tick va svegliato          */
+
+    int32_t exit_code;                  /* valore con cui il processo è terminato       */
+    int32_t killed_by;                  /* numero dell'eccezione che lo ha fatto terminare,
+                                           oppure NOT_KILLED                            */
+
+    /*
+     * Parentela tra processi. Si usano i PID e non i puntatori ai PCB: un PCB può
+     * essere liberato, e un puntatore rimasto in giro indicherebbe memoria non più
+     * valida; un PID al massimo "non si trova più" (process_find restituisce 0).
+     */
+    uint32_t parent_pid;                /* chi ha avviato questo processo con la syscall
+                                           spawn (0 = nessuno: lo ha creato il kernel)  */
+    uint32_t waiting_for_pid;           /* se è bloccato nella syscall wait: il PID del
+                                           figlio di cui aspetta la fine (0 = nessuno)  */
 
     struct process *next;               /* prossimo PCB: la lista è CIRCOLARE           */
 };
@@ -75,11 +136,42 @@ extern struct process *idle_process;        /* il processo 0, che gira quando ne
 /* Trasforma il flusso di esecuzione attuale (kernel_main) nel processo 0. */
 void process_init(void);
 
-/* Crea un nuovo processo che eseguirà `entry`. Restituisce il PCB, o 0 se manca memoria. */
+/* Crea un thread del kernel che eseguirà `entry`. Restituisce il PCB, o 0 se manca memoria. */
 struct process *process_create(const char *name, void (*entry)(void));
 
-/* Termina il processo corrente. Non ritorna mai. */
-void process_exit(void);
+/*
+ * Crea un processo utente a partire dall'immagine di un programma: `image` punta
+ * ai byte del programma (un binario piatto, vedi user/user.ld) e `image_size` è la
+ * loro quantità. Restituisce il PCB, o 0 se i byte non sono un programma (manca il
+ * numero magico), se il programma è troppo grande o se manca memoria.
+ */
+struct process *process_create_user(const char *name, const uint8_t *image, uint32_t image_size);
+
+/* Termina il processo corrente con il codice indicato (per convenzione 0 = tutto
+ * bene, come il valore restituito dal main in C o System.exit in Java). Non ritorna mai. */
+void process_exit(int32_t exit_code);
+
+/* Termina d'autorità il processo corrente perché ha provocato un'eccezione
+ * (accesso a memoria non sua, istruzione vietata...). Non ritorna mai. */
+void process_kill_current(struct registers *regs);
+
+/* Cerca un processo dato il suo PID. Restituisce 0 se non esiste (più).
+ * Va chiamata a interrupt disabilitati: la lista non deve cambiare durante la ricerca. */
+struct process *process_find(uint32_t pid);
+
+/* Cerca un processo dato il suo nome (il primo che trova). Stesse regole di process_find. */
+struct process *process_find_by_name(const char *name);
+
+/*
+ * Reazione a Ctrl+C: termina il programma "in primo piano", cioè quello di cui un
+ * altro processo (di solito la shell) sta aspettando la fine. Se non c'è nessun
+ * programma in primo piano non fa nulla. La chiama il driver della tastiera.
+ */
+void process_interrupt_foreground(void);
+
+/* Termina un ALTRO processo (non quello corrente, non il processo 0), che in quel
+ * momento è per forza fermo. La sua memoria verrà liberata da process_reap_terminated. */
+void process_kill(struct process *process);
 
 /* Libera la memoria dei processi terminati. La chiama il processo 0. */
 void process_reap_terminated(void);
@@ -87,7 +179,7 @@ void process_reap_terminated(void);
 /* Quanti processi esistono (compreso il processo 0). */
 uint32_t process_count(void);
 
-/* Stampa l'elenco dei processi con stato e tempo di CPU (sarà il comando `ps`). */
+/* Stampa l'elenco dei processi con stato e tempo di CPU (è ciò che mostra il comando `ps`). */
 void process_print_list(void);
 
 #endif /* PROC_PROCESS_H */

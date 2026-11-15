@@ -14,6 +14,9 @@
 #define IRQ_TIMER      0
 #define IRQ_KEYBOARD   1
 
+/* Un gestore possibile per ognuno dei 256 numeri di interrupt. */
+#define INTERRUPT_HANDLER_COUNT 256
+
 /*
  * La "fotografia" della CPU al momento dell'interrupt: tutto ciò che è stato messo
  * sullo stack dalla CPU e da kernel/interrupt_stubs.asm.
@@ -55,8 +58,14 @@ typedef void (*interrupt_handler_t)(struct registers *regs);
 /* Prepara IDT e controllore degli interrupt. Non abilita ancora gli interrupt. */
 void interrupts_init(void);
 
-/* Registra la funzione da chiamare quando arriva l'interrupt `number` (0-47). */
+/* Registra la funzione da chiamare quando arriva l'interrupt `number`. */
 void interrupt_register_handler(uint8_t number, interrupt_handler_t handler);
+
+/* Restituisce 1 se l'interrupt ha interrotto un programma utente, 0 se il kernel. */
+int interrupt_came_from_user(struct registers *regs);
+
+/* Il nome di un'eccezione della CPU (0-31), per i messaggi. */
+const char *interrupt_exception_name(uint32_t number);
 
 /* Stampa lo stato della CPU salvato in `regs` e ferma il sistema. Non ritorna mai.
  * Usata per le eccezioni che non si possono gestire. */

@@ -11,6 +11,7 @@
 void memtest_pmm(void);         /* allocatore di pagine fisiche */
 void memtest_paging(void);      /* paginazione                  */
 void memtest_heap(void);        /* kmalloc e kfree              */
+void memtest_address_spaces(void);  /* una page directory per processo */
 
 /* Stampa il riepilogo finale: quante verifiche sono fallite in tutto. */
 void memtest_summary(void);

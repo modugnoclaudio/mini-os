@@ -23,6 +23,8 @@
 #include "proc/process.h"
 #include "drivers/timer.h"
 #include "kernel/interrupts.h"
+#include "kernel/gdt.h"
+#include "mm/paging.h"
 
 /* Definita in proc/switch.asm. */
 extern void context_switch(uint32_t *old_esp, uint32_t new_esp);
@@ -91,6 +93,32 @@ void schedule(void)
     switch_count++;
 
     /*
+     * Due cose in più rispetto al semplice cambio di stack, necessarie da quando
+     * esistono i processi utente.
+     *
+     * 1) Lo STACK DEL KERNEL da usare al prossimo ingresso nel kernel. Quando un
+     *    interrupt o una syscall interrompe un programma utente, la CPU legge dal
+     *    TSS dove mettere i registri: deve essere la cima dello stack del kernel
+     *    del processo che sta per girare. (Il processo 0 non ha uno stack allocato
+     *    da noi e non va mai in modalità utente: per lui non serve.)
+     */
+    if (next->stack != 0) {
+        gdt_set_kernel_stack((uint32_t) next->stack + KERNEL_STACK_SIZE);
+    }
+
+    /*
+     * 2) Lo SPAZIO DI INDIRIZZI. Se il nuovo processo ha una page directory diversa
+     *    la carichiamo in CR3: da qui in poi gli indirizzi della zona utente portano
+     *    alla SUA memoria. Tra due thread del kernel la directory è la stessa e
+     *    il cambio si salta (e con lui lo svuotamento del TLB).
+     *    Il kernel resta raggiungibile in ogni caso: è mappato uguale in tutte le
+     *    directory, compreso lo stack su cui stiamo lavorando in questo momento.
+     */
+    if (next->directory != previous->directory) {
+        paging_switch_directory(next->directory);
+    }
+
+    /*
      * Il MECCANISMO: salva i registri di `previous` e carica quelli di `next`.
      * Questa chiamata "ritorna" solo quando qualcuno, in futuro, sceglierà di nuovo
      * `previous`: per lui sarà come se la funzione avesse semplicemente impiegato
@@ -153,6 +181,39 @@ void process_sleep(uint32_t ticks)
     current_process->state = PROCESS_SLEEPING;
     current_process->wake_tick = timer_get_ticks() + ticks;
     schedule();
+
+    interrupts_restore(flags);
+}
+
+void process_block(void)
+{
+    /* Come per sleep: il processo 0 deve restare sempre disponibile. */
+    if (current_process == idle_process) {
+        return;
+    }
+
+    uint32_t flags = interrupts_save_and_disable();
+
+    /*
+     * COLLEGAMENTO CON LA TEORIA: è la transizione "in esecuzione -> bloccato" del
+     * diagramma degli stati. Un processo che aspetta un tasto non deve consumare
+     * CPU controllando di continuo (attesa attiva): si toglie dai pronti, e sarà
+     * il gestore dell'interrupt della tastiera a rimettercelo.
+     * È la differenza con process_sleep(): lì si aspetta un ISTANTE, qui un EVENTO.
+     */
+    current_process->state = PROCESS_BLOCKED;
+    schedule();
+
+    interrupts_restore(flags);
+}
+
+void process_wake(struct process *process)
+{
+    uint32_t flags = interrupts_save_and_disable();
+
+    if (process != 0 && process->state == PROCESS_BLOCKED) {
+        process->state = PROCESS_READY;     /* lo scheduler lo sceglierà al suo turno */
+    }
 
     interrupts_restore(flags);
 }

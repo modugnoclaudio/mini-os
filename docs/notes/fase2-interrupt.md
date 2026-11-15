@@ -204,6 +204,8 @@ Timer: 3 s dall'avvio
 ```
 (Gli indirizzi possono cambiare leggermente se il codice viene modificato.)
 (Dalla fase 3 l'output è più lungo e il messaggio finale è diverso: vedi `docs/notes/fase3-memoria.md`.)
+(Dalla fase 6 le righe "Timer: N s" non ci sono più e i tasti non compaiono da soli:
+li legge la shell. Vedi `docs/notes/fase6-fs-shell.md`.)
 
 **Tastiera:** `make run`, clicca nella finestra di QEMU e scrivi. Le lettere compaiono
 sotto l'ultima riga, Shift dà le maiuscole, Backspace cancella, Invio va a capo.

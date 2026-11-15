@@ -20,13 +20,14 @@
 #include "kernel/idt.h"
 #include "lib/kprintf.h"
 #include "drivers/pic.h"
+#include "proc/process.h"
 
 /*
  * La tabella dei gestori: un array di puntatori a funzione, indicizzato dal numero
  * dell'interrupt. Una casella a 0 (puntatore nullo) significa "nessun gestore".
  * Essendo `static` e non inizializzato, parte tutto a zero.
  */
-static interrupt_handler_t handlers[INTERRUPT_STUB_COUNT];
+static interrupt_handler_t handlers[INTERRUPT_HANDLER_COUNT];
 
 /* Nomi delle eccezioni della CPU, per messaggi di errore leggibili.
  * È un array di stringhe: ogni elemento è un `const char *` (puntatore al primo carattere). */
@@ -70,6 +71,21 @@ void interrupts_disable(void)
     __asm__ volatile ("cli");
 }
 
+int interrupt_came_from_user(struct registers *regs)
+{
+    /* I 2 bit più bassi del registro CS salvato sono il livello di privilegio del
+     * codice che è stato interrotto: 0 = kernel, 3 = utente. */
+    return (regs->cs & 0x3) == 3;
+}
+
+const char *interrupt_exception_name(uint32_t number)
+{
+    if (number < 32) {
+        return exception_names[number];
+    }
+    return "sconosciuta";
+}
+
 uint32_t interrupts_save_and_disable(void)
 {
     /*
@@ -93,9 +109,8 @@ void interrupts_restore(uint32_t flags)
 
 void interrupt_register_handler(uint8_t number, interrupt_handler_t handler)
 {
-    if (number < INTERRUPT_STUB_COUNT) {
-        handlers[number] = handler;
-    }
+    /* `number` è un uint8_t: vale al massimo 255, quindi non può uscire dall'array. */
+    handlers[number] = handler;
 }
 
 /*
@@ -153,7 +168,7 @@ void interrupt_dispatch(struct registers *regs)
      * in kernel/idt.c). Farlo prima ci tornerà utile nella fase 4: il gestore del
      * timer potrà cambiare processo senza "dimenticarsi" la conferma.
      */
-    if (regs->int_no >= INT_IRQ_BASE) {
+    if (regs->int_no >= INT_IRQ_BASE && regs->int_no < INT_IRQ_BASE + 16) {
         pic_send_eoi((uint8_t) (regs->int_no - INT_IRQ_BASE));
     }
 
@@ -162,8 +177,16 @@ void interrupt_dispatch(struct registers *regs)
          * chiamata normale. */
         handler(regs);
     } else if (regs->int_no < 32) {
-        /* Un'eccezione senza gestore è un bug del kernel. */
-        interrupt_panic(regs);
+        /*
+         * Un'eccezione che nessuno gestisce. Conta CHI l'ha provocata:
+         *   - un programma utente: è un suo errore, si termina solo lui;
+         *   - il kernel: è un nostro bug, non ci si può più fidare di nulla -> panic.
+         */
+        if (interrupt_came_from_user(regs)) {
+            process_kill_current(regs);
+        } else {
+            interrupt_panic(regs);
+        }
     }
 }
 

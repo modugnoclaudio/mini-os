@@ -13,7 +13,8 @@
 #   make          compila tutto e produce build/kernel.elf
 #   make run      avvia il kernel in QEMU (finestra VGA + seriale nel terminale)
 #   make run-nox  come run ma senza finestra (solo seriale); si esce con Ctrl+A poi X
-#   make test     avvio automatico senza finestra: controlla il messaggio sulla seriale
+#   make test     avvio automatico senza finestra, in modalità di collaudo: esegue
+#                 tutte le prove e controlla ciò che compare sulla seriale
 #   make debug    avvia QEMU fermo alla prima istruzione e ci collega GDB
 #   make clean    cancella tutto ciò che è stato compilato
 
@@ -77,6 +78,22 @@ OBJECTS := $(patsubst %.c,$(BUILD)/%.o,$(C_SOURCES)) \
            $(patsubst %.asm,$(BUILD)/%.asm.o,$(ASM_SOURCES))
 
 # ----------------------------------------------------------------------------
+# Programmi utente
+# ----------------------------------------------------------------------------
+# I programmi in user/*.c NON fanno parte del kernel (infatti `user` non è in
+# SRC_DIRS). Ognuno diventa un file a sé, build/user/NOME.bin: un "binario piatto"
+# collegato con user/user.ld per girare all'indirizzo virtuale 0x40000000.
+# Il kernel li incorpora poi come dati (fs/initial_files.asm): all'avvio diventano
+# file del filesystem in RAM, da cui vengono caricati in processi separati.
+USER_SOURCES := $(wildcard user/*.c)
+USER_BINS    := $(patsubst user/%.c,$(BUILD)/user/%.bin,$(USER_SOURCES))
+
+# La libreria comune a tutti i programmi. crt0 va per primo: contiene _start.
+# lib/string.o è lo stesso file oggetto usato dal kernel: sono funzioni di puro
+# calcolo (memcpy, string_equals...), che ogni programma si porta dentro in copia.
+USER_LIB_OBJECTS := $(BUILD)/user/lib/crt0.asm.o $(BUILD)/user/lib/ulib.o $(BUILD)/lib/string.o
+
+# ----------------------------------------------------------------------------
 # Regole
 # ----------------------------------------------------------------------------
 # .PHONY: questi nomi sono comandi, non file da creare.
@@ -90,6 +107,21 @@ all: $(KERNEL)
 $(KERNEL): $(OBJECTS) linker.ld
 	$(LD) $(LDFLAGS) -o $@ $(OBJECTS)
 	@echo ">>> Kernel pronto: $@"
+
+# Collegamento di un programma utente: il suo .o più la libreria, con lo script
+# user/user.ld. `--oformat binary` produce il binario piatto invece di un file ELF.
+# (I .o si ottengono con le stesse regole di compilazione del kernel, qui sotto.)
+$(BUILD)/user/%.bin: $(BUILD)/user/%.o $(USER_LIB_OBJECTS) user/user.ld
+	$(LD) -m elf_i386 -T user/user.ld --oformat binary -nostdlib -o $@ $(USER_LIB_OBJECTS) $<
+
+# Il file che incorpora nel kernel i file iniziali del filesystem (programmi utente
+# e file di fs/root/) va riassemblato ogni volta che uno di essi cambia: lo diciamo
+# a make con una dipendenza esplicita.
+$(BUILD)/fs/initial_files.asm.o: $(USER_BINS) $(wildcard fs/root/*)
+
+# make cancellerebbe da solo i file "intermedi" (i .o dei programmi utente) dopo
+# averli usati; questa riga glielo vieta, così non vengono ricompilati ogni volta.
+.SECONDARY:
 
 # Compilazione di un file C. Regola "a modello": % sta per qualsiasi percorso.
 # $< = la prima dipendenza (il .c)     @mkdir -p crea la cartella di destinazione
@@ -112,9 +144,11 @@ run: $(KERNEL)
 run-nox: $(KERNEL)
 	$(QEMU) -kernel $(KERNEL) -nographic -no-reboot
 
-# Prova automatica: avvia QEMU senza finestra per 8 secondi, salva la seriale in un
-# file e controlla che contenga i messaggi attesi (avvio, eccezione di prova, prove
-# della memoria e dei processi, timer) e che non compaia mai la parola "ERRORE".
+# Prova automatica: avvia QEMU senza finestra in MODALITÀ DI COLLAUDO, salva la
+# seriale in un file e controlla che contenga i messaggi attesi e che non compaia
+# mai la parola "ERRORE".
+#   -append autotest   la "riga di comando" passata al kernel: gli dice di eseguire
+#                      le prove automatiche e di collaudare la shell (kernel/kernel.c)
 #   -serial file:...   QEMU scrive la seriale direttamente nel file
 #   -monitor none      niente console di comandi di QEMU
 #   < /dev/null        QEMU non ha una tastiera da cui leggere
@@ -122,20 +156,30 @@ run-nox: $(KERNEL)
 # terminale, e un processo in background che tocca il terminale viene sospeso dal
 # sistema operativo (segnali SIGTTIN/SIGTTOU: il controllo dei job visto a lezione).
 # Risultato: QEMU restava congelato e il test si bloccava.
-# `timeout` termina QEMU (il kernel non esce mai da solo); `|| true` ignora il suo
-# codice di uscita "scaduto"; `grep -q` fallisce se il testo non c'è.
+# Finite le prove il kernel spegne da solo la macchina virtuale, quindi di norma
+# QEMU termina in pochi secondi; `timeout 30` è solo una rete di sicurezza nel caso
+# qualcosa si blocchi. `|| true` ignora il codice di uscita; `grep -q` fallisce se
+# il testo non c'è.
 test: $(KERNEL)
 	@rm -f $(BUILD)/serial.log
-	@timeout 8 $(QEMU) -kernel $(KERNEL) -no-reboot -display none -monitor none \
-		-serial file:$(BUILD)/serial.log < /dev/null > /dev/null 2>&1 || true
+	@timeout 30 $(QEMU) -kernel $(KERNEL) -append autotest -no-reboot -display none \
+		-monitor none -serial file:$(BUILD)/serial.log < /dev/null > /dev/null 2>&1 || true
 	@cat $(BUILD)/serial.log
 	@grep -q "Hello, kernel!" $(BUILD)/serial.log \
 		&& grep -q "Ritorno dall'eccezione riuscito" $(BUILD)/serial.log \
 		&& grep -q "Memoria: tutte le prove superate" $(BUILD)/serial.log \
-		&& ! grep -q "ERRORE" $(BUILD)/serial.log \
+		&& grep -q "File system: tutte le prove superate" $(BUILD)/serial.log \
 		&& grep -q "Processi: tutte le prove superate" $(BUILD)/serial.log \
-		&& grep -q "Timer: 3 s" $(BUILD)/serial.log \
-		&& echo ">>> TEST OK: avvio, eccezioni, memoria, processi e timer funzionano" \
+		&& grep -q "Shell: tutte le prove superate" $(BUILD)/serial.log \
+		&& grep -q "Scrivi 'help' per vedere i comandi disponibili" $(BUILD)/serial.log \
+		&& grep -q "\[hello\] Ciao dalla modalita' utente" $(BUILD)/serial.log \
+		&& grep -q "^ciao dal collaudo" $(BUILD)/serial.log \
+		&& grep -q "cat: file non trovato: nota.txt" $(BUILD)/serial.log \
+		&& grep -q "non esiste oppure non e' un programma" $(BUILD)/serial.log \
+		&& grep -q "Comando sconosciuto: frullatore" $(BUILD)/serial.log \
+		&& grep -q "^\^C" $(BUILD)/serial.log \
+		&& ! grep -q "ERRORE" $(BUILD)/serial.log \
+		&& echo ">>> TEST OK: kernel, memoria, filesystem, processi, programmi utente e shell funzionano" \
 		|| (echo ">>> TEST FALLITO: manca un messaggio atteso oppure c'e' un ERRORE" && false)
 
 # Debug con GDB.
@@ -159,4 +203,4 @@ clean:
 # Dipendenze dagli header: gcc (con -MMD) scrive accanto a ogni .o un file .d che
 # dice "questo .o dipende anche da questi .h". Includendoli, make ricompila i .c
 # giusti quando si modifica un header. Il `-` iniziale ignora i file non ancora creati.
--include $(OBJECTS:.o=.d)
+-include $(OBJECTS:.o=.d) $(USER_BINS:.bin=.d) $(USER_LIB_OBJECTS:.o=.d)
