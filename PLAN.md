@@ -104,7 +104,7 @@ docs/
 | 14/11 | Ogni processo utente ha la sua page directory; le righe del kernel sono copiate e puntano alle stesse page table | Kernel mappato ovunque agli stessi indirizzi: syscall e interrupt non cambiano `CR3` |
 | 14/11 | Page table dell'heap del kernel create in anticipo (`paging_reserve_kernel_tables`) | Le directory dei processi copiano le righe: una tabella creata dopo non sarebbe visibile in quelle esistenti |
 | 14/11 | Layout utente: programma a `0x40000000` (64 KiB), stack sotto `0xB0000000` (16 KiB); zona utente `0x40000000`–`0xC0000000` | Dimensioni fisse: loader banale, nessun formato da interpretare |
-| 14/11 | Programmi utente come binari piatti (`user/user.ld`), incorporati nel kernel con `incbin` (`proc/user_programs.asm`) | Non c'è ancora un disco né un filesystem; niente loader ELF da scrivere |
+| 14/11 | Programmi utente come binari piatti (`user/user.ld`), incorporati nel kernel con `incbin` (`proc/user_programs.asm`) — *superata in parte il 15/11: ora passano da `fs/initial_files.asm` e dal filesystem in RAM* | Non c'è ancora un disco né un filesystem; niente loader ELF da scrivere |
 | 14/11 | Puntatori ricevuti dalle syscall sempre validati (`paging_is_user_range`) | Il kernel può leggere tutto: senza controllo un programma gli farebbe leggere o stampare memoria non sua |
 | 14/11 | Eccezione provocata in ring 3 = terminazione del solo processo (`process_kill_current`); in ring 0 = panic | L'errore di un programma non deve fermare il sistema |
 | 14/11 | `process_kill` per terminare un altro processo dall'esterno | Serve per i programmi che non terminano; è sicuro finché il kernel non ha lock |
