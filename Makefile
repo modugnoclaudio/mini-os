@@ -16,6 +16,8 @@
 #   make test     avvio automatico senza finestra, in modalità di collaudo: esegue
 #                 tutte le prove e controlla ciò che compare sulla seriale
 #   make debug    avvia QEMU fermo alla prima istruzione e ci collega GDB
+#   make web      prepara la demo per il browser in build/web/ (scarica l'emulatore v86)
+#   make web-run  come web, poi la serve su http://localhost:8000
 #   make clean    cancella tutto ciò che è stato compilato
 
 # ----------------------------------------------------------------------------
@@ -97,7 +99,7 @@ USER_LIB_OBJECTS := $(BUILD)/user/lib/crt0.asm.o $(BUILD)/user/lib/ulib.o $(BUIL
 # Regole
 # ----------------------------------------------------------------------------
 # .PHONY: questi nomi sono comandi, non file da creare.
-.PHONY: all run run-nox test debug clean
+.PHONY: all run run-nox test debug clean web web-run
 
 # Il primo bersaglio del file è quello predefinito: `make` equivale a `make all`.
 all: $(KERNEL)
@@ -199,6 +201,60 @@ debug: $(KERNEL)
 
 clean:
 	rm -rf $(BUILD)
+
+# ----------------------------------------------------------------------------
+# Demo nel browser
+# ----------------------------------------------------------------------------
+# La demo usa v86, un emulatore di PC che gira nel browser: gli diamo lo stesso
+# build/kernel.elf che avviamo con QEMU (anche v86 sa fare da bootloader Multiboot).
+#
+# v86 non è nostro e non sta nel repository: viene scaricato una volta sola nella
+# cartella web/vendor/ (ignorata da git). Le versioni sono FISSATE, così la demo
+# si comporta sempre allo stesso modo:
+#   - libv86.js e v86.wasm  dal pacchetto npm `v86`, versione $(V86_VERSION)
+#   - seabios.bin, vgabios.bin  (i BIOS del PC simulato) dal repository di v86,
+#     al commit da cui è stato costruito quel pacchetto
+V86_VERSION := 0.5.473
+V86_COMMIT  := 315b2b0
+V86_PACKAGE := https://registry.npmjs.org/v86/-/v86-$(V86_VERSION).tgz
+V86_BIOS    := https://raw.githubusercontent.com/copy/v86/$(V86_COMMIT)/bios
+
+VENDOR  := web/vendor
+WEB_DIR := $(BUILD)/web
+
+# Scarica i file di v86 e ne verifica l'impronta SHA-256 contro web/vendor.sha256:
+# se un file scaricato fosse diverso da quello atteso (download corrotto o
+# manomesso), `sha256sum -c` fallisce e la demo non viene preparata.
+#   curl -fsSL   f = errore se il server risponde con un errore, s = silenzioso,
+#                S = mostra comunque gli errori, L = segue i reindirizzamenti
+#   tar ... --strip-components=2   estrae togliendo le cartelle package/build/
+# Il file vuoto .scaricato serve solo a make per ricordarsi che è già stato fatto.
+$(VENDOR)/.scaricato: web/vendor.sha256
+	@mkdir -p $(VENDOR)
+	@echo ">>> Scarico v86 $(V86_VERSION) in $(VENDOR)/ (solo la prima volta)"
+	curl -fsSL -o $(VENDOR)/v86.tgz $(V86_PACKAGE)
+	tar -xzf $(VENDOR)/v86.tgz -C $(VENDOR) --strip-components=2 package/build/libv86.js package/build/v86.wasm
+	tar -xzf $(VENDOR)/v86.tgz -C $(VENDOR) --strip-components=1 package/LICENSE
+	rm $(VENDOR)/v86.tgz
+	curl -fsSL -o $(VENDOR)/seabios.bin $(V86_BIOS)/seabios.bin
+	curl -fsSL -o $(VENDOR)/vgabios.bin $(V86_BIOS)/vgabios.bin
+	cd $(VENDOR) && sha256sum -c ../vendor.sha256
+	@touch $@
+
+# Prepara in build/web/ tutto ciò che serve alla pagina: è una cartella autonoma,
+# che si può anche copiare così com'è su un qualsiasi server web.
+web: $(KERNEL) $(VENDOR)/.scaricato web/index.html
+	@mkdir -p $(WEB_DIR)/v86
+	cp web/index.html $(KERNEL) $(WEB_DIR)/
+	cp $(VENDOR)/libv86.js $(VENDOR)/v86.wasm $(VENDOR)/seabios.bin $(VENDOR)/vgabios.bin $(VENDOR)/LICENSE $(WEB_DIR)/v86/
+	@echo ">>> Demo pronta in $(WEB_DIR)/"
+
+# Serve la demo con il piccolo server web incluso in Python. Serve un server perché
+# i browser non lasciano scaricare file a una pagina aperta con un doppio clic.
+# Per fermarlo: Ctrl+C.
+web-run: web
+	@echo ">>> Apri nel browser: http://localhost:8000   (Ctrl+C per fermare)"
+	python3 -m http.server 8000 --directory $(WEB_DIR)
 
 # Dipendenze dagli header: gcc (con -MMD) scrive accanto a ogni .o un file .d che
 # dice "questo .o dipende anche da questi .h". Includendoli, make ricompila i .c
