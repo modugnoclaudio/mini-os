@@ -22,23 +22,24 @@ Dopo quella data si continua con Opus 5.5.
 | 4 | Processi: PCB, context switch, scheduler round-robin | sab 14 | ✅ fatta |
 | 5 | Syscall (`int 0x80`) e programmi in user mode | dom 15 | ✅ fatta |
 | 6 | Filesystem in RAM e shell (`ls`, `cat`, `ps`, `run`) | lun 16 | ✅ fatta |
-| 7 | Demo nel browser con v86, README, rifiniture | mar 17+ (anche con Opus) | ⬜ da fare |
+| 7 | Demo nel browser con v86, README, rifiniture | mar 17+ (anche con Opus) | ✅ fatta |
 
 Legenda: ⬜ da fare · 🟨 in corso · ✅ fatta · ⚠️ fatta con problemi noti
 
 ## Prossimo passo
-Fase 7: demo nel browser con v86, README, rifiniture.
-Primo passo concreto: scrivere il `README.md` (oggi contiene solo il titolo) con
-descrizione, requisiti, comandi `make` e una sessione di esempio della shell.
-Poi la demo nel browser: verificare se v86 sa avviare direttamente un kernel Multiboot
-(`build/kernel.elf`); se no, creare un'immagine ISO avviabile con GRUB
-(`grub-mkrescue`) e aggiungere un target `make iso`.
+Le sette fasi del piano sono completate. Restano all'autore alcune scelte e verifiche:
 
-Da ricordare per la fase 7:
-- lo spegnimento automatico di `make test` (porta `0x604`) funziona solo in QEMU;
-- con un bootloader diverso da QEMU vanno riverificate la riga di comando Multiboot
-  (`autotest`) e la posizione della struttura Multiboot (vedi "Problemi noti");
-- il layout di tastiera è solo americano: per una demo pubblica vale la pena dirlo.
+1. Provare sul proprio PC (WSL2) `make test`, `make run` e `make web-run`.
+2. Completare i segnaposto `TODO` del `README.md`: nome e cognome, corso e anno
+   accademico, descrizione del proprio ruolo nella sezione sull'uso dell'IA.
+3. Scegliere una licenza (oggi non c'è nessun file `LICENSE`).
+4. Decidere se pubblicare la demo (per esempio con GitHub Pages): `build/web/` è già
+   una cartella autonoma; servirebbe un workflow che la costruisca e la pubblichi.
+
+Possibili sviluppi, in ordine di interesse didattico: argomenti ai programmi
+(`run conta 10`); pipe e redirezione nella shell; semafori al posto degli interrupt
+disabilitati; pagine di guardia per gli stack; un vero disco (ATA) con un filesystem
+persistente; un formato eseguibile ELF.
 
 ## Struttura del repository
 ```
@@ -53,6 +54,7 @@ mm/                gestione della memoria
 proc/              processi e scheduler
 fs/                filesystem
 user/              programmi utente e shell
+web/               pagina della demo nel browser (v86)
 lib/               funzioni di supporto (memset, kprintf...)
 docs/
   NOTES_TEMPLATE.md
@@ -121,6 +123,11 @@ docs/
 | 15/11 | Syscall con quattro argomenti (aggiunto `ESI`); 13 syscall in tutto | `file_read` ha bisogno di nome, buffer, quantità e posizione |
 | 15/11 | Prove automatiche solo se la riga di comando Multiboot contiene `autotest` (`make test`); `make run` va dritto alla shell | Avvio normale pulito; stessa immagine del kernel per uso e collaudo |
 | 15/11 | In collaudo un thread del kernel "digita" nella shell (`kernel/autotest.c`) e poi spegne QEMU (porta `0x604`) | Prova ripetibile di tutta la catena tastiera → shell → syscall; `make test` dura 2 secondi invece di 8 |
+| 16/11 | Demo web: v86 avvia direttamente `build/kernel.elf` come kernel Multiboot; niente immagine ISO né GRUB | Ha funzionato al primo tentativo senza modifiche al kernel |
+| 16/11 | v86 e i BIOS non stanno nel repository: `make web` li scarica in `web/vendor/` a versioni fissate (`v86` 0.5.473 da npm, BIOS dal commit `315b2b0`) e ne verifica lo SHA-256 | Repository piccolo e fatto solo di codice nostro; demo riproducibile; un download alterato viene rifiutato |
+| 16/11 | `build/web/` è una cartella autonoma servita da `python3 -m http.server` (`make web-run`); nessuna pubblicazione automatica | Funziona senza rete dopo la prima preparazione; pubblicare è una scelta dell'autore |
+| 16/11 | Il kernel azzera da sé la sezione `.bss` in `boot/boot.asm` (simboli `bss_start`/`bss_end` in `linker.ld`) | Dopo un riavvio a caldo la RAM non è a zero e il bootloader può non azzerarla |
+| 16/11 | README secondo lo schema della skill `readme-progetto`, con segnaposto `TODO` per i dati che solo l'autore conosce | Meglio un segnaposto onesto che un dato inventato |
 
 ## Problemi noti
 _(nessun bug aperto)_
@@ -133,6 +140,13 @@ _(nessun bug aperto)_
 - 14/11 — ✅ risolto in fase 4 (`kprintf` è ora una sezione critica). Voce originale: 11/11 — `kprintf` non è protetta dagli interrupt: l'eco di un tasto può finire in mezzo a una riga stampata dal ciclo principale. Innocuo per ora; da sistemare quando ci saranno più processi (fase 4).
 - 11/11 — Tastiera: layout solo US (simboli e accentate non corrispondono a una tastiera italiana); frecce e altri tasti estesi ignorati; niente Caps Lock né Ctrl/Alt.
 - 11/11 — PIC: gli interrupt "spuri" (IRQ 7 e 15) non sono trattati in modo speciale. In QEMU non si presentano.
+- 16/11 — La fase 7 è stata provata solo nel container: la demo web con Chromium senza interfaccia pilotato in automatico (avvio, comandi, Ctrl+C, tre riavvii, larghezza da telefono), non con un browser vero su Windows/WSL2.
+- 16/11 — La demo web non ha una prova automatica nel repository (quelle usate durante lo sviluppo richiedono Playwright). Su telefono la pagina si vede ma non è utilizzabile: serve una tastiera fisica.
+- 16/11 — Il diagramma Mermaid del `README.md` non è stato disegnato in locale: va controllato come appare su GitHub.
+- 16/11 — `make web` dipende da due siti esterni (registro npm e GitHub) alla prima esecuzione; se le versioni fissate venissero rimosse andrebbero aggiornate insieme a `web/vendor.sha256`.
+- 16/11 — Pubblicare la demo significa ridistribuire v86 (BSD) e i BIOS (LGPL): le rispettive licenze vanno accompagnate ai file (quella di v86 viene già copiata in `build/web/v86/`).
+- 16/11 — In v86 la mappa della memoria Multiboot dichiara libera anche la zona `0xC0000`-`0xFFFFF` (ROM): innocuo, perché il kernel non usa mai il primo MiB.
+- 16/11 — ✅ risolto in fase 7: il kernel dipendeva dall'azzeramento della `.bss` da parte del bootloader e non sopravviveva a un riavvio a caldo.
 - 15/11 — Le fasi 5 e 6 sono state provate solo nel container (40 esecuzioni consecutive di `make test` senza errori, 16 e 512 MiB di RAM, tasti veri inviati dal monitor di QEMU), non su WSL2.
 - 15/11 — Filesystem: nessuna persistenza (tutto si perde allo spegnimento), nessuna sottocartella, nessun permesso; un file si può solo riscrivere per intero; il puntatore restituito da `fs_find` vale solo finché il file non viene sostituito o cancellato.
 - 15/11 — Shell: nessun argomento passato ai programmi, niente pipe, redirezione, esecuzione in background, cronologia o tasti freccia. Layout di tastiera solo americano.
@@ -170,3 +184,4 @@ _(nessun bug aperto)_
 | 14/11 | Fable 5.2 | Fase 4 completa in tre passi: sezioni critiche, PCB e context switch con processi cooperativi, scheduler round-robin con prelazione e `sleep`. Trovata e corretta una race condition nei test. `make test` passa. Scritta `docs/notes/fase4-processi.md` |
 | 14/11 | Fable 5.2 | Fase 5 completa in tre passi: segmenti utente, TSS e syscall `int 0x80`; una page directory per processo; programmi utente (`user/`) compilati a parte, caricati dal kernel ed eseguiti in ring 3, con protezione verificata. Trovata la starvation del processo 0 nei test. `make test` passa. Scritta `docs/notes/fase5-modo-utente.md` |
 | 15/11 | Fable 5.2 | Fase 6 completa in tre passi: tastiera con buffer e lettura bloccante; filesystem in RAM con i programmi come file; shell in modalità utente con 8 nuove syscall, Ctrl+C e collaudo automatico. `make test` passa. Scritta `docs/notes/fase6-fs-shell.md` |
+| 16/11 | Fable 5.2 | Fase 7: demo nel browser con v86 (`make web`, `make web-run`), provata con un browser pilotato in automatico; trovato e corretto il mancato azzeramento della `.bss`; scritto il `README.md`. `make test` passa. Scritta `docs/notes/fase7-demo-web.md` |
