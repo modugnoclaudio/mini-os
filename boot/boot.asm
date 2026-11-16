@@ -51,6 +51,8 @@ stack_top:
 section .text
 global _start                       ; rende _start visibile al linker (vedi ENTRY in linker.ld)
 extern kernel_main                  ; funzione definita in C, in kernel/kernel.c
+extern bss_start                    ; inizio e fine della sezione .bss:
+extern bss_end                      ; simboli definiti in linker.ld
 
 _start:
     ; Stato della CPU garantito da Multiboot in questo momento:
@@ -61,6 +63,27 @@ _start:
     ; Lo stack invece NON è garantito: lo impostiamo noi.
 
     mov esp, stack_top              ; ESP (stack pointer) = cima del nostro stack
+
+    ; --- Azzeramento della .bss ---
+    ; Il C garantisce che le variabili globali non inizializzate valgano 0, e tutto
+    ; il kernel ci conta (la tabella dei file "vuota", i contatori che partono da 0...).
+    ; Ma quella garanzia qualcuno deve realizzarla. Di solito ci pensa il bootloader;
+    ; noi non ci fidiamo e lo facciamo da soli, perché:
+    ;   - non tutti i bootloader lo fanno;
+    ;   - dopo un RIAVVIO "a caldo" la RAM contiene ancora i valori di prima.
+    ; (Scoperto con la demo nel browser: vedi docs/notes/fase7-demo-web.md.)
+    ; Va fatto QUI, prima di qualsiasi push: anche lo stack sta nella .bss.
+    ;
+    ; `rep stosb` = "ripeti ECX volte: scrivi il byte AL all'indirizzo EDI, poi EDI++".
+    ; È un memset scritto in una sola istruzione.
+    mov edx, eax                    ; mette al sicuro il numero magico: EAX ci serve
+    mov edi, bss_start              ; EDI = da dove iniziare
+    mov ecx, bss_end
+    sub ecx, edi                    ; ECX = quanti byte (fine - inizio)
+    xor eax, eax                    ; AL = 0, il valore da scrivere
+    cld                             ; direzione "in avanti" (EDI aumenta)
+    rep stosb
+    mov eax, edx                    ; ripristina il numero magico
 
     ; Chiamiamo kernel_main(magic, info).
     ; Convenzione di chiamata del C a 32 bit ("cdecl"): gli argomenti si mettono
