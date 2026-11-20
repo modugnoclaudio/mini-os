@@ -27,14 +27,12 @@ Dopo quella data si continua con Opus 5.5.
 Legenda: ⬜ da fare · 🟨 in corso · ✅ fatta · ⚠️ fatta con problemi noti
 
 ## Prossimo passo
-Le sette fasi del piano sono completate. Restano all'autore alcune scelte e verifiche:
+Le sette fasi del piano sono completate e il `README.md` è compilato. Restano all'autore:
 
 1. Provare sul proprio PC (WSL2) `make test`, `make run` e `make web-run`.
-2. Completare i segnaposto `TODO` del `README.md`: nome e cognome, corso e anno
-   accademico, descrizione del proprio ruolo nella sezione sull'uso dell'IA.
-3. Scegliere una licenza (oggi non c'è nessun file `LICENSE`).
-4. Decidere se pubblicare la demo (per esempio con GitHub Pages): `build/web/` è già
+2. Decidere se pubblicare la demo (per esempio con GitHub Pages): `build/web/` è già
    una cartella autonoma; servirebbe un workflow che la costruisca e la pubblichi.
+   In quel caso va aggiunto il link nella sezione "Demo nel browser" del README.
 
 Possibili sviluppi, in ordine di interesse didattico: argomenti ai programmi
 (`run conta 10`); pipe e redirezione nella shell; semafori al posto degli interrupt
@@ -128,6 +126,8 @@ docs/
 | 16/11 | `build/web/` è una cartella autonoma servita da `python3 -m http.server` (`make web-run`); nessuna pubblicazione automatica | Funziona senza rete dopo la prima preparazione; pubblicare è una scelta dell'autore |
 | 16/11 | Il kernel azzera da sé la sezione `.bss` in `boot/boot.asm` (simboli `bss_start`/`bss_end` in `linker.ld`) | Dopo un riavvio a caldo la RAM non è a zero e il bootloader può non azzerarla |
 | 16/11 | README secondo lo schema della skill `readme-progetto`, con segnaposto `TODO` per i dati che solo l'autore conosce | Meglio un segnaposto onesto che un dato inventato |
+| 20/11 | Licenza MIT (file `LICENSE`, titolare: modugnoclaudio) | Scelta dell'autore: permette il riuso con la sola citazione; è la più diffusa per progetti didattici |
+| 20/11 | README compilato con le scelte dell'autore: solo lo username GitHub come nome, "progetto personale" come contesto, descrizione del ruolo dell'autore nella sezione sull'IA | Dati forniti dall'autore; sostituiscono i segnaposto `TODO` del 16/11 |
 
 ## Problemi noti
 _(nessun bug aperto)_
@@ -185,3 +185,4 @@ _(nessun bug aperto)_
 | 14/11 | Fable 5.2 | Fase 5 completa in tre passi: segmenti utente, TSS e syscall `int 0x80`; una page directory per processo; programmi utente (`user/`) compilati a parte, caricati dal kernel ed eseguiti in ring 3, con protezione verificata. Trovata la starvation del processo 0 nei test. `make test` passa. Scritta `docs/notes/fase5-modo-utente.md` |
 | 15/11 | Fable 5.2 | Fase 6 completa in tre passi: tastiera con buffer e lettura bloccante; filesystem in RAM con i programmi come file; shell in modalità utente con 8 nuove syscall, Ctrl+C e collaudo automatico. `make test` passa. Scritta `docs/notes/fase6-fs-shell.md` |
 | 16/11 | Fable 5.2 | Fase 7: demo nel browser con v86 (`make web`, `make web-run`), provata con un browser pilotato in automatico; trovato e corretto il mancato azzeramento della `.bss`; scritto il `README.md`. `make test` passa. Scritta `docs/notes/fase7-demo-web.md` |
+| 20/11 | Opus 5.5 | README compilato con nome, contesto e ruolo indicati dall'autore; aggiunta la licenza MIT. Aperta la pull request della fase 7 |

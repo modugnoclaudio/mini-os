@@ -4,6 +4,7 @@
 
 ![Linguaggio: C](https://img.shields.io/badge/linguaggio-C%20%2B%20assembly-blue.svg)
 ![Architettura: x86 a 32 bit](https://img.shields.io/badge/architettura-x86%20a%2032%20bit-lightgrey.svg)
+[![Licenza: MIT](https://img.shields.io/badge/licenza-MIT-yellow.svg)](LICENSE)
 ![Emulatori: QEMU e v86](https://img.shields.io/badge/gira%20su-QEMU%20%C2%B7%20v86%20%28browser%29-green.svg)
 
 mini-os è un kernel che si avvia con lo standard Multiboot, gestisce interrupt, memoria virtuale e processi, ed esegue programmi separati in modalità utente che gli parlano solo tramite chiamate di sistema. Sopra ci sono un filesystem in RAM e una shell. Non usa nessuna libreria: tutto ciò che serve, da `kprintf` a `kmalloc`, è scritto nel progetto.
@@ -204,8 +205,6 @@ make web-run
 
 Poi aprire http://localhost:8000. La cartella `build/web/` è autonoma: copiata su un qualsiasi server web, la demo funziona anche lì.
 
-<!-- TODO: se la demo viene pubblicata (es. con GitHub Pages), aggiungere qui il link. -->
-
 ---
 
 ## Comandi
@@ -244,7 +243,8 @@ mini-os/
 ├── linker.ld        # Dove sta in memoria ogni parte del kernel
 ├── Makefile
 ├── PLAN.md          # Stato, decisioni di progetto, problemi noti
-└── CLAUDE.md        # Regole di lavoro del progetto
+├── CLAUDE.md        # Regole di lavoro del progetto
+└── LICENSE          # Licenza MIT
 ```
 
 ---
@@ -286,25 +286,23 @@ Ogni fase ha una dispensa in [`docs/notes/`](docs/notes/) con la stessa struttur
 
 | Nome | Ruolo |
 |---|---|
-| [modugnoclaudio](https://github.com/modugnoclaudio) <!-- TODO: nome e cognome --> | Autore |
+| [modugnoclaudio](https://github.com/modugnoclaudio) | Autore |
 
-<!-- TODO: corso di laurea, insegnamento e anno accademico, se il progetto viene consegnato. -->
-
-Progetto individuale di uno studente di Ingegneria Informatica: mette in pratica gli argomenti di Sistemi Operativi ed è un'occasione per imparare il C partendo da Java.
+Progetto personale di uno studente di Ingegneria Informatica, non legato a un esame: mette in pratica gli argomenti del corso di Sistemi Operativi ed è un'occasione per imparare il C partendo da Java.
 
 ## Uso dell'intelligenza artificiale
 
-Il codice, i commenti e le dispense sono stati scritti con [Claude Code](https://claude.com/claude-code), l'assistente di programmazione di Anthropic, una fase alla volta e secondo le regole fissate in [`CLAUDE.md`](CLAUDE.md). Il registro delle sessioni in [`PLAN.md`](PLAN.md) indica cosa è stato fatto in ciascuna.
+L'autore ha scelto il progetto e la sua architettura, ha scritto le regole di lavoro ([`CLAUDE.md`](CLAUDE.md)), il piano in sette fasi ([`PLAN.md`](PLAN.md)) e il modello delle dispense ([`docs/NOTES_TEMPLATE.md`](docs/NOTES_TEMPLATE.md)); ha guidato lo sviluppo una fase alla volta, ha provato il sistema sul proprio PC e ha revisionato e unito ogni pull request.
 
-<!-- TODO: descrivi con parole tue il tuo ruolo (scelta del progetto e del piano, prove sul tuo PC, revisione e merge delle pull request, studio delle dispense), se il regolamento del corso lo richiede. -->
+Il codice, i commenti e le dispense sono stati scritti con [Claude Code](https://claude.com/claude-code), l'assistente di programmazione di Anthropic, seguendo quelle regole. Il registro delle sessioni in [`PLAN.md`](PLAN.md) indica cosa è stato fatto in ciascuna.
 
 ---
 
 ## Licenza
 
-<!-- TODO: il repository non ha ancora un file LICENSE. Senza una licenza, per legge nessuno può riusare il codice: se vuoi permetterlo, aggiungine una (per esempio MIT). -->
+MIT: il codice si può usare, modificare e ridistribuire liberamente, anche in altri progetti, purché si mantenga la nota di copyright. Vedi [LICENSE](LICENSE).
 
-Nessuna licenza è stata ancora scelta.
+La licenza riguarda il codice di mini-os. v86 e i BIOS usati dalla demo non fanno parte del repository e restano sotto le rispettive licenze (vedi i crediti).
 
 ## Crediti
 

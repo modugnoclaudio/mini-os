@@ -120,8 +120,10 @@ qualsiasi funzione C (lo stack stesso sta nella `.bss`).
 - **Il kernel azzera la propria `.bss`** invece di fidarsi del bootloader. È ciò
   che fanno i kernel veri.
 - **README con segnaposto `TODO`** per i dati che solo l'autore conosce (nome,
-  corso, licenza), invece di inventarli.
-- **Nessuna licenza scelta**: anche questa spetta all'autore.
+  corso, licenza), invece di inventarli. Compilati il 20/11 con le risposte
+  dell'autore.
+- **Licenza MIT**, scelta dall'autore il 20/11 (file `LICENSE`). Riguarda solo il
+  codice di mini-os: v86 e i BIOS restano sotto le loro licenze.
 
 ## Come provarlo
 ```bash
