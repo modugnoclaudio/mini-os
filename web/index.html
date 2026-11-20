@@ -1,0 +1,238 @@
+<!doctype html>
+<!--
+  web/index.html — La demo di mini-os nel browser.
+
+  Questa pagina non contiene il sistema operativo: contiene un EMULATORE di PC, v86
+  (https://github.com/copy/v86), scritto in JavaScript e WebAssembly. v86 simula una
+  CPU x86 con il suo schermo, la sua tastiera e il suo timer; dentro quel PC simulato
+  gira il nostro kernel, lo stesso file build/kernel.elf che avviamo con QEMU.
+
+  Come QEMU con l'opzione -kernel, anche v86 sa fare da bootloader Multiboot: per
+  questo non serve nessuna immagine disco.
+
+  La pagina si prepara con `make web` e si apre con `make web-run`
+  (non funziona aprendo il file direttamente: vedi il controllo su "file:" più sotto).
+-->
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mini-os — demo nel browser</title>
+<style>
+  :root {
+    --sfondo: #14161a;
+    --pannello: #1d2026;
+    --bordo: #2e333d;
+    --testo: #d7dae0;
+    --testo-debole: #9097a3;
+    --accento: #7fd4a0;
+    --avviso: #e8c170;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--sfondo);
+    color: var(--testo);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  main {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 32px 16px 48px;
+  }
+
+  h1 { font-size: 1.6rem; margin: 0 0 4px; }
+  h2 { font-size: 1.05rem; margin: 28px 0 8px; }
+  p  { margin: 0 0 12px; }
+  a  { color: var(--accento); }
+
+  .sottotitolo { color: var(--testo-debole); margin-bottom: 20px; }
+
+  /* La barra sopra lo schermo: stato dell'emulatore e pulsante di riavvio. */
+  .barra {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 12px;
+    background: var(--pannello);
+    border: 1px solid var(--bordo);
+    border-bottom: 0;
+    border-radius: 8px 8px 0 0;
+    font-size: 0.9rem;
+  }
+
+  #stato { color: var(--avviso); }
+  #stato.pronto { color: var(--accento); }
+
+  button {
+    font: inherit;
+    font-size: 0.85rem;
+    color: var(--testo);
+    background: transparent;
+    border: 1px solid var(--bordo);
+    border-radius: 6px;
+    padding: 4px 12px;
+    cursor: pointer;
+  }
+  button:hover { border-color: var(--testo-debole); }
+  button:focus-visible { outline: 2px solid var(--accento); outline-offset: 2px; }
+
+  /* Lo "schermo" del PC simulato. v86 scrive il testo nel <div> interno, una riga
+     per ciascuna delle 25 righe dello schermo VGA. Se la finestra è più stretta di
+     80 colonne compare una barra di scorrimento orizzontale solo qui dentro. */
+  .schermo {
+    background: #000;
+    border: 1px solid var(--bordo);
+    border-radius: 0 0 8px 8px;
+    padding: 10px;
+    overflow-x: auto;
+    min-height: 372px;
+  }
+  #screen_container > div {
+    white-space: pre;
+    font: 14px/14px "DejaVu Sans Mono", Consolas, Menlo, monospace;
+    color: #c0c0c0;
+  }
+
+  .nota { color: var(--testo-debole); font-size: 0.9rem; }
+
+  code, kbd {
+    font: 0.9em "DejaVu Sans Mono", Consolas, Menlo, monospace;
+    background: var(--pannello);
+    border: 1px solid var(--bordo);
+    border-radius: 4px;
+    padding: 1px 5px;
+  }
+
+  table { border-collapse: collapse; width: 100%; font-size: 0.95rem; }
+  th, td { text-align: left; padding: 6px 12px 6px 0; border-bottom: 1px solid var(--bordo); vertical-align: top; }
+  th { color: var(--testo-debole); font-weight: 600; }
+  td:first-child { white-space: nowrap; }
+
+  #errore {
+    display: none;
+    margin-top: 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--avviso);
+    border-radius: 8px;
+    color: var(--avviso);
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>mini-os</h1>
+  <p class="sottotitolo">Un sistema operativo didattico per x86 a 32 bit, in esecuzione nel tuo browser.</p>
+
+  <div class="barra">
+    <span id="stato" role="status">Avvio del PC simulato…</span>
+    <button id="riavvia" type="button">Riavvia</button>
+  </div>
+  <div class="schermo">
+    <!-- La struttura che v86 si aspetta: un <div> per la modalità testo e un
+         <canvas> per quella grafica (che il nostro kernel non usa). -->
+    <div id="screen_container">
+      <div></div>
+      <canvas style="display: none"></canvas>
+    </div>
+  </div>
+  <div id="errore"></div>
+
+  <p class="nota" style="margin-top: 10px">
+    Scrivi direttamente sulla tastiera: i tasti vanno al PC simulato.
+    La tastiera è in layout americano: lettere, numeri, <kbd>-</kbd> e <kbd>.</kbd> coincidono con quella italiana, gli altri simboli no.
+  </p>
+
+  <h2>Cosa provare</h2>
+  <table>
+    <tr><th>Comando</th><th>Cosa fa</th></tr>
+    <tr><td><code>help</code></td><td>Elenca i comandi della shell.</td></tr>
+    <tr><td><code>ls</code></td><td>Elenca i file del filesystem in RAM.</td></tr>
+    <tr><td><code>cat leggimi.txt</code></td><td>Mostra il contenuto di un file.</td></tr>
+    <tr><td><code>run hello</code></td><td>Esegue un programma in modalità utente.</td></tr>
+    <tr><td><code>run conta</code></td><td>Un programma che conta, dormendo tra un passo e l'altro.</td></tr>
+    <tr><td><code>run invasore</code></td><td>Prova a scrivere nella memoria del kernel: il kernel lo ferma e prosegue.</td></tr>
+    <tr><td><code>run ciclo</code></td><td>Non termina mai: fermalo con <kbd>Ctrl</kbd>+<kbd>C</kbd>.</td></tr>
+    <tr><td><code>scrivi nota.txt ciao</code></td><td>Crea un file; poi <code>cat nota.txt</code> e <code>rm nota.txt</code>.</td></tr>
+    <tr><td><code>ps</code></td><td>Elenca i processi.</td></tr>
+  </table>
+
+  <h2>Cosa c'è sotto</h2>
+  <p>
+    La pagina carica <a href="https://github.com/copy/v86">v86</a>, un emulatore di PC scritto in JavaScript e WebAssembly.
+    Dentro quel PC simulato gira lo stesso kernel che si avvia con QEMU: avvio Multiboot, interrupt, memoria virtuale con paginazione,
+    processi con scheduler round-robin, programmi in modalità utente che parlano con il kernel tramite syscall,
+    un filesystem in RAM e questa shell.
+  </p>
+  <p class="nota">
+    I file creati vivono solo in memoria: si perdono con «Riavvia» o ricaricando la pagina.
+  </p>
+</main>
+
+<script src="v86/libv86.js"></script>
+<script>
+  "use strict";
+
+  var stato = document.getElementById("stato");
+  var errore = document.getElementById("errore");
+
+  function mostraErrore(messaggio) {
+    errore.textContent = messaggio;
+    errore.style.display = "block";
+    stato.textContent = "Non avviato";
+  }
+
+  if (location.protocol === "file:") {
+    // Aperta con un doppio clic, la pagina non può scaricare il kernel e
+    // l'emulatore: i browser vietano queste richieste da file locali.
+    mostraErrore("Questa pagina va aperta tramite un server web: lancia «make web-run» " +
+                 "nella cartella del progetto e apri l'indirizzo che compare.");
+  } else if (typeof V86 === "undefined") {
+    mostraErrore("Emulatore non trovato: la pagina va preparata con «make web».");
+  } else {
+    // Il PC simulato. Le opzioni corrispondono a quelle che diamo a QEMU:
+    //   memory_size  = quanta RAM ha il PC (64 MiB bastano e avanzano)
+    //   bios         = il BIOS del PC: lo stesso SeaBIOS che usa QEMU
+    //   multiboot    = il nostro kernel, caricato come fa `qemu -kernel`
+    var emulatore = new V86({
+      wasm_path: "v86/v86.wasm",
+      memory_size: 64 * 1024 * 1024,
+      vga_memory_size: 2 * 1024 * 1024,
+      screen_container: document.getElementById("screen_container"),
+      bios: { url: "v86/seabios.bin" },
+      vga_bios: { url: "v86/vgabios.bin" },
+      multiboot: { url: "kernel.elf" },
+      autostart: true
+    });
+
+    // Il kernel scrive tutto anche sulla porta seriale (drivers/serial.c). La
+    // ascoltiamo per capire quando la shell ha stampato il suo prompt: è il
+    // segnale che l'avvio è finito.
+    var seriale = "";
+    emulatore.add_listener("serial0-output-byte", function (byte) {
+      if (stato.classList.contains("pronto")) {
+        return;
+      }
+      seriale += String.fromCharCode(byte);
+      if (seriale.indexOf("mini-os> ") !== -1) {
+        stato.textContent = "In esecuzione";
+        stato.classList.add("pronto");
+        seriale = "";
+      }
+    });
+
+    document.getElementById("riavvia").addEventListener("click", function () {
+      stato.textContent = "Riavvio…";
+      stato.classList.remove("pronto");
+      seriale = "";
+      emulatore.restart();
+      this.blur();    // il pulsante non deve trattenere la tastiera
+    });
+  }
+</script>
+</body>
+</html>

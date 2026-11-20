@@ -61,13 +61,18 @@ SECTIONS
 
     /*
      * Variabili globali non inizializzate e lo stack del kernel (definito in boot.asm).
-     * Nel file ELF la .bss non occupa spazio: il bootloader la riserva e la azzera in RAM.
+     * Nel file ELF la .bss non occupa spazio: il bootloader le riserva la RAM e di norma
+     * la azzera; per sicurezza la azzeriamo anche noi all'avvio (boot/boot.asm).
      * COMMON è un vecchio modo in cui il C chiama alcune globali non inizializzate.
      */
     .bss ALIGN(4K) :
     {
+        /* Due simboli che delimitano la sezione: boot/boot.asm li usa per azzerarla
+         * all'avvio, senza fidarsi che lo abbia fatto il bootloader. */
+        bss_start = .;
         *(COMMON)
         *(.bss .bss.*)
+        bss_end = .;
     }
 
     /* Simbolo che segna la fine del kernel: servirà all'allocatore di memoria (fase 3). */
